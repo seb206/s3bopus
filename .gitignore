@@ -11,3 +11,4 @@ linux/*.rpm
 S3bopus/
 !mac/Sources/S3bopus/
 .DS_Store
+x11/s3bopus

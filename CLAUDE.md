@@ -5,6 +5,7 @@ Explorateur de fichiers à deux panneaux (inspiré de Directory Opus). Version c
 ## Structure
 - `src/` : version Windows, WinForms sur .NET Framework 4.8 (`net48`, LangVersion 10), appels Win32 (shell32, CopyFileEx).
 - `linux/` : version Linux, Avalonia 11 sur .NET 10, publiée en un seul fichier ; paquets .deb (`build-deb.py`) et .rpm (`build-rpm.sh`).
+- `x11/` : version Linux en C avec Xlib + Xft, sans .NET (50 Ko, `make` dans WSL/Linux avec libx11-dev libxft-dev, `make test` sous Xvfb + xdotool). Prototype : deux panneaux, onglets, tailles de dossiers, file de transferts ; pas encore d'archives, de collage presse-papiers, de réglages ni de paquets.
 - `mac/` : version Mac native, Swift 6 + AppKit, sans .NET (SwiftPM, macOS 13+, binaire universel ~1,4 Mo). Pas d'archives pour l'instant.
 - `shared/Archives.cs` : lecture des archives et historique des emplacements, lié dans les deux projets (`<Compile Include>`).
 - `tests/` : xUnit (net10.0), `cd tests && dotnet test`.
