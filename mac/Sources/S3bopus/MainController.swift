@@ -124,10 +124,46 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
             cmd("terminal", "", Lang.T("Ouvrir un terminal ici", "Open a terminal here"), #selector(openTerminal)),
             cmd("folder", "", Lang.T("Afficher dans le Finder", "Show in Finder"), #selector(revealFolder))
         ]
-        let bar = NSStackView(views: views)
-        bar.spacing = 4
-        bar.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+        let left = NSStackView(views: views)
+        left.spacing = 4
+
+        // Langue (relance) et thème (immédiat), en haut à droite
+        let lang = cmd("globe", Lang.en ? "FR" : "EN", Lang.T("Switch to English", "Passer en français"), #selector(toggleLanguage))
+        themeButton = cmd("moon", "", "", #selector(toggleTheme))
+        updateThemeButton()
+        let right = NSStackView(views: [lang, themeButton])
+        right.spacing = 4
+
+        let bar = NSView()
+        for v in [left, right] { v.translatesAutoresizingMaskIntoConstraints = false; bar.addSubview(v) }
+        NSLayoutConstraint.activate([
+            bar.heightAnchor.constraint(equalToConstant: 34),
+            left.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8), left.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            right.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8), right.centerYAnchor.constraint(equalTo: bar.centerYAnchor)
+        ])
         return bar
+    }
+
+    private var themeButton: NSButton!
+
+    private var isDark: Bool {
+        switch Settings.int("Appearance", 0) {
+        case 1: return false
+        case 2: return true
+        default: return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+    }
+
+    private func updateThemeButton() {
+        let dark = isDark
+        themeButton?.image = NSImage(systemSymbolName: dark ? "sun.max" : "moon", accessibilityDescription: nil)
+        themeButton?.toolTip = dark ? Lang.T("Mode clair", "Light mode") : Lang.T("Mode sombre", "Dark mode")
+    }
+
+    @objc func toggleTheme() {
+        Settings.set("Appearance", isDark ? 1 : 2)
+        MainController.applyAppearance()
+        updateThemeButton()
     }
 
     private func functionBar() -> NSView {
@@ -292,7 +328,7 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
         let v = s.tag
         Settings.set("Appearance", v)
         MainController.applyAppearance()
-        s.menu?.items.forEach { $0.state = $0.tag == v ? .on : .off }
+        updateThemeButton()
     }
     static func applyAppearance() {
         switch Settings.int("Appearance", 0) {
@@ -301,8 +337,10 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
         default: NSApp.appearance = nil
         }
     }
-    @objc func setLanguage(_ s: NSMenuItem) {
-        let en = s.tag == 1
+    @objc func toggleLanguage() { applyLanguage(en: !Lang.en) }
+    @objc func setLanguage(_ s: NSMenuItem) { applyLanguage(en: s.tag == 1) }
+
+    private func applyLanguage(en: Bool) {
         guard en != Lang.en else { return }
         Settings.set("English", en)
         if Dialogs.confirm(Lang.T("Redémarrer pour appliquer la langue ?", "Restart to apply the language?"), "", ok: Lang.T("Redémarrer", "Restart")) {
@@ -312,6 +350,8 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
             NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { _, _ in
                 DispatchQueue.main.async { NSApp.terminate(nil) }
             }
+        } else {
+            Settings.set("English", Lang.en)
         }
     }
 
@@ -323,6 +363,8 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
 
     /// Les actions sur les fichiers sont inertes pendant la saisie dans un champ texte.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(setAppearance(_:)) { item.state = item.tag == Settings.int("Appearance", 0) ? .on : .off }
+        if item.action == #selector(setLanguage(_:)) { item.state = (item.tag == 1) == Lang.en ? .on : .off }
         let editing = window.firstResponder is NSText
         let fileActions: [Selector] = [#selector(trash), #selector(openSelection), #selector(goUp), #selector(rename), #selector(invertSelection)]
         if editing, let a = item.action, fileActions.contains(a) { return false }
