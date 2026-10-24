@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>s3bopus</AssemblyName>
+    <RootNamespace>S3bopus</RootNamespace>
+    <Version>0.0.2</Version>
+    <Product>S3bopus</Product>
+    <Description>Explorateur de fichiers double panneau</Description>
+    <!-- Évite la dépendance à libicu (version différente selon les Debian) -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DebugType>none</DebugType>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.0" />
+    <PackageReference Include="SharpCompress" Version="0.50.7" />
+    <!-- Version corrigée (GHSA-xrw6-gwf8-vvr9) de la dépendance DBus d Avalonia -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+    <EmbeddedResource Include="s3bopus.png" LogicalName="s3bopus.png" />
+    <Compile Include="../shared/*.cs" Link="shared/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>S3bopus — Un gestionnaire de fichiers à deux panneaux, avec une vraie file d'attente</title>
+  <meta name="description" content="Explorateur de fichiers léger à deux panneaux pour Windows et Linux, inspiré de Directory Opus sur Amiga : taille des dossiers et vraie file de copie.">
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><img src="icon.png" alt="" width="36" height="36"><span>S3bopus</span></div>
+    <nav>
+      <a href="/" data-i18n="back">← Retour à S3btify</a>
+      <a href="#about" data-i18n="nav_about">À propos</a>
+      <a href="#download" data-i18n="nav_download">Télécharger</a>
+      <button id="lang" class="lang" type="button">EN</button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>S3bopus</h1>
+      <p class="tagline" data-i18n="tagline">Deux panneaux, une file d'attente, et rien d'autre.</p>
+      <p class="lead" data-i18n="lead">Un gestionnaire de fichiers à deux panneaux, léger et portable, pour Windows et Linux, dans l'esprit de Directory Opus sur Amiga.</p>
+      <a class="cta" href="#download" data-i18n="cta">Télécharger gratuitement</a>
+      <p class="version"><span data-i18n="version">Version</span> 0.0.2</p>
+    </section>
+
+    <section id="about" class="about">
+      <h2 data-i18n="nav_about">À propos</h2>
+      <p data-i18n="p1">S3bopus est né d'une frustration : autant sous Linux que sur PC, le gestionnaire de fichiers est franchement nul. Pas de vraie file d'attente : sous Windows il y a enfin la pause (whoooooau !), mais tout se copie en même temps et c'est la catastrophe. Et impossible de coller directement dans l'Explorateur un texte ou une image du presse-papiers pour en faire un fichier.</p>
+      <p data-i18n="p2">S3bopus reprend les points essentiels de Directory Opus sur Amiga : la taille des répertoires, et un vrai gestionnaire de copie. Les transferts passent un par un dans une file, avec progression, pause, reprise, annulation et gestion des conflits.</p>
+      <p data-i18n="p3">Et il est hyper portable : un seul petit fichier, sans installation, qu'on pose n'importe où sur le PC. Sous Linux, un paquet .deb ou .rpm.</p>
+      <div class="cards">
+        <article>
+          <h3 data-i18n="h1">Taille des dossiers</h3>
+          <p data-i18n="c1">Calcul en arrière-plan, mise à jour en direct dans la colonne Taille, tri possible.</p>
+        </article>
+        <article>
+          <h3 data-i18n="h2">File de transferts</h3>
+          <p data-i18n="c2">Une tâche à la fois, pause et reprise, vitesse et temps restant, remplacer / ignorer / garder les deux.</p>
+        </article>
+        <article>
+          <h3 data-i18n="h3">Onglets et archives</h3>
+          <p data-i18n="c3">Des onglets dans chaque panneau, et les archives (ZIP, 7z, RAR, tar.gz) s'ouvrent comme des dossiers.</p>
+        </article>
+        <article>
+          <h3 data-i18n="h4">Clair ou sombre, FR ou EN</h3>
+          <p data-i18n="c4">Deux boutons en haut à droite. Collez du texte ou une image du presse-papiers : ça crée un .txt ou un .jpg.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="download" class="download">
+      <h2 data-i18n="nav_download">Télécharger</h2>
+      <div class="dl-grid">
+        <div class="dl">
+          <h3>Windows</h3>
+          <p data-i18n="win_req">Windows 10 / 11. Rien à installer : dézippez et lancez. Toutes les archives (ZIP, 7z, RAR, tar.gz).</p>
+          <a class="button" href="downloads/S3bopus-0.0.2-win.zip" data-count="win" download><span data-i18n="dl_win">Télécharger pour Windows</span></a>
+          <p class="meta">S3bopus-0.0.2-win.zip · 1.8 Mo · SHA-256 85f8a101d8731b835b9854f34842b4601c645289d40d84799cbbb897fed999cb</p>
+          <p class="note" data-i18n="win_note">Windows peut afficher un avertissement SmartScreen : le programme n'est pas signé.</p>
+        </div>
+        <div class="dl">
+          <h3>Windows <span data-i18n="light">light</span></h3>
+          <p data-i18n="winl_req">Le même programme en 156 Ko : seules les archives ZIP s'ouvrent dans le panneau.</p>
+          <a class="button" href="downloads/S3bopus-light-0.0.2-win.zip" data-count="winlight" download><span data-i18n="dl_winl">Télécharger la version light</span></a>
+          <p class="meta">S3bopus-light-0.0.2-win.zip · 70 Ko · SHA-256 1c97a3d8006c16f95e3ecf092727772f58067d795e3e60b40468b171acff59cd</p>
+        </div>
+        <div class="dl">
+          <h3>Linux (.deb)</h3>
+          <p data-i18n="deb_req">Debian / Ubuntu, 64 bits. Rien d'autre à installer.</p>
+          <a class="button" href="downloads/s3bopus_0.0.2_amd64.deb" data-count="deb" download><span data-i18n="dl_deb">Télécharger le paquet .deb</span></a>
+          <p class="meta">s3bopus_0.0.2_amd64.deb · 38.9 Mo · SHA-256 597ab608e05e96309a27c59f6ed1de734f86d28ef847c878f97fbf7ec2574a73</p>
+          <p class="note"><code>sudo apt install ./s3bopus_*_amd64.deb</code></p>
+        </div>
+        <div class="dl">
+          <h3>Linux (.rpm)</h3>
+          <p data-i18n="rpm_req">Fedora / RHEL / openSUSE, 64 bits.</p>
+          <a class="button" href="downloads/s3bopus-0.0.2-1.x86_64.rpm" data-count="rpm" download><span data-i18n="dl_rpm">Télécharger le paquet .rpm</span></a>
+          <p class="meta">s3bopus-0.0.2-1.x86_64.rpm · 38.9 Mo · SHA-256 1199d3a2a406f70ed48f73c4941373955640b87e1d36beab1824de73555d1e2d</p>
+          <p class="note"><code>sudo dnf install ./s3bopus-*.rpm</code></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p><a href="/" data-i18n="back">← Retour à S3btify</a></p>
+    <div id="counters" class="counters hidden">
+      <div class="counter"><span data-i18n="c_visits">Visiteurs</span><span class="odometer" id="c-visits"></span></div>
+      <div class="counter"><span data-i18n="c_downloads">Téléchargements</span><span class="odometer" id="c-downloads"></span></div>
+    </div>
+    <p class="contact" id="contact"><span data-i18n="contact">Contact :</span> <span id="contact-out"><button type="button" id="contact-open" class="linkish" data-i18n="contact_show">Afficher l'adresse e-mail</button></span></p>
+    <form id="contact-form" class="contact-form hidden" autocomplete="off">
+      <p class="small" data-i18n="contact_help">Recopiez les 5 chiffres pour afficher l'adresse (protection contre les robots qui ramassent les adresses).</p>
+      <div class="contact-row">
+        <img id="contact-img" alt="" width="190" height="60">
+        <button type="button" id="contact-new" class="linkish" data-i18n="contact_new">Autre code</button>
+      </div>
+      <div class="contact-row">
+        <input id="contact-answer" inputmode="numeric" pattern="[0-9]*" maxlength="5" required aria-labelledby="contact-help-label">
+        <button type="submit" class="contact-ok" data-i18n="contact_ok">Afficher</button>
+      </div>
+      <span id="contact-help-label" class="hidden" data-i18n="contact_code">Code</span>
+      <p id="contact-err" class="small contact-err" role="status"></p>
+    </form>
+    <p class="small" data-i18n="footer_privacy">Ce site ne dépose aucun cookie : il compte seulement les visites et les téléchargements, sans rien enregistrer sur vous (ni adresse IP, ni identifiant).</p>
+  </footer>
+  <script src="app.js?v=1"></script>
+</body>
+</html>

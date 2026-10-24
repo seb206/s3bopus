@@ -1,0 +1,192 @@
+:root {
+  --bg: #0b0b0f;
+  --panel: #16161d;
+  --panel-2: #1f1f29;
+  --text: #f4f4f7;
+  --muted: #a9a9b8;
+  --accent: #8b5cf6;
+  --accent-hi: #a78bfa;
+  --amiga: #2563eb;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif;
+  background-image: radial-gradient(ellipse 80% 50% at 50% -10%, #3b1d7a 0%, transparent 60%);
+  background-repeat: no-repeat;
+}
+a { color: var(--accent-hi); }
+.top { display: flex; justify-content: space-between; align-items: center; max-width: 1080px; margin: 0 auto; padding: 18px 20px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 22px; }
+.brand img { border-radius: 8px; }
+nav { display: flex; align-items: center; gap: 20px; }
+nav a { color: var(--muted); text-decoration: none; font-weight: 600; }
+nav a:hover { color: var(--text); }
+.lang { background: var(--panel-2); color: var(--text); border: 1px solid #333; border-radius: 999px; padding: 4px 12px; cursor: pointer; font-weight: 700; }
+main { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+.hero { text-align: center; padding: 70px 0 60px; }
+.hero h1 { font-size: clamp(56px, 11vw, 120px); line-height: 1; margin: 0; font-weight: 900; letter-spacing: -0.04em;
+  background: linear-gradient(90deg, #fff, var(--accent-hi)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.tagline { font-size: 20px; color: var(--accent-hi); font-weight: 700; margin: 10px 0 18px; }
+.lead { font-size: 19px; color: var(--muted); max-width: 640px; margin: 0 auto 28px; }
+.cta { display: inline-block; background: var(--accent); color: #fff; text-decoration: none; font-weight: 800; padding: 14px 32px; border-radius: 999px; }
+.cta:hover { background: var(--accent-hi); }
+.version { color: var(--muted); font-size: 14px; margin-top: 14px; }
+h2 { font-size: 34px; margin: 0 0 16px; }
+.about, .download { padding: 50px 0; border-top: 1px solid #23232e; }
+.screens { padding: 40px 0 10px; }
+.shot { margin: 0; text-align: center; }
+.shot img { max-width: 100%; height: auto; border-radius: 14px; border: 1px solid #262633; box-shadow: 0 10px 40px #0008; }
+.shot figcaption { margin: 12px auto 0; max-width: 520px; color: var(--muted); font-size: 14px; }
+.shot.wide figcaption { max-width: 760px; }
+.shots { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 40px; margin-top: 40px; }
+.shots .shot { flex: 1 1 280px; max-width: 420px; }
+.shots-title { text-align: center; margin: 50px 0 0; font-size: 24px; }
+.shots .shot img { max-height: 620px; width: auto; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin: 24px 0; }
+.cards article { background: var(--panel); border: 1px solid #262633; border-radius: 14px; padding: 20px; }
+.cards h3 { margin: 0 0 8px; font-size: 18px; }
+.cards p { margin: 0; color: #d4d4de; font-size: 15px; }
+.cards .elite { border-color: var(--amiga); background: linear-gradient(160deg, #0f1e4a, var(--panel) 70%); }
+.todo ol { margin: 12px 0 0; padding-left: 24px; color: #d4d4de; font-size: 15px; }
+.todo li { margin: 6px 0; }
+.privacy { color: var(--muted); }
+.credits { color: var(--muted); font-size: 14px; }
+.turnstile { margin: 16px 0 24px; min-height: 65px; }
+.dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.dl { background: var(--panel); border: 1px solid #262633; border-radius: 14px; padding: 22px; }
+.dl h3 { margin: 0 0 6px; font-size: 22px; }
+.dl button { margin: 12px 0 8px; width: 100%; background: var(--accent); color: #fff; border: 0; border-radius: 999px; padding: 13px; font-weight: 800; font-size: 15px; cursor: pointer; }
+.dl button:disabled { background: #34343f; color: #8c8c99; cursor: not-allowed; }
+.dl a.button { display: block; text-align: center; text-decoration: none; margin: 12px 0 8px; background: var(--accent); color: #fff; border-radius: 999px; padding: 13px; font-weight: 800; font-size: 15px; }
+.dl a.button:hover { background: var(--accent-hi); }
+.dl .meta { color: var(--muted); font-size: 12px; margin: 0; word-break: break-all; }
+.dl .note { color: var(--muted); font-size: 13px; }
+code { background: #000; padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+.status { color: var(--muted); }
+.status.error { color: #f87171; }
+footer { max-width: 1080px; margin: 0 auto; padding: 30px 20px 50px; border-top: 1px solid #23232e; text-align: center; }
+/* Compteurs façon années 2000 : chiffres verts lumineux dans des cases noires */
+.counters { display: flex; justify-content: center; flex-wrap: wrap; gap: 26px; margin: 4px 0 18px; }
+.counters.hidden { display: none; }
+.counter { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.12em; }
+.odometer { display: inline-flex; gap: 2px; padding: 3px; background: #222; border: 2px outset #555; }
+.odometer span { display: inline-block; width: 18px; text-align: center; background: #000; color: #39ff14;
+  font: 700 20px/28px "Courier New", Courier, monospace; text-shadow: 0 0 6px #39ff14;
+  border: 1px inset #333; background-image: linear-gradient(#111 0 50%, #000 50% 100%); }
+.blink { animation: blink 1s steps(2, start) infinite; color: #facc15; font-weight: 800; }
+@keyframes blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .blink { animation: none; } }
+.small { color: var(--muted); font-size: 13px; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent-hi); font: inherit; text-decoration: underline; cursor: pointer; }
+.contact-form { max-width: 340px; margin: 4px auto 18px; padding: 14px 16px; border: 1px solid #2c2c3a; border-radius: 10px; background: #15151d; }
+.contact-form.hidden, .contact-form .hidden { display: none; }
+.contact-row { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 8px 0; }
+.contact-row img { border-radius: 6px; }
+.contact-row input { width: 110px; padding: 9px 10px; border-radius: 8px; border: 1px solid #3a3a4a; background: #0e0e14; color: var(--text, #fff);
+  font-size: 18px; letter-spacing: 4px; text-align: center; }
+.contact-ok { background: var(--accent); color: #fff; border: 0; border-radius: 999px; padding: 9px 18px; font-weight: 800; cursor: pointer; }
+.contact-ok:hover { background: var(--accent-hi); }
+.contact-err { min-height: 1em; margin: 6px 0 0; color: #f0a0a0; }
+@media (max-width: 600px) { nav a { display: none; } .hero { padding-top: 40px; } }
+/* Lien « Comment ça marche » et page du même nom */
+a.brand { color: inherit; text-decoration: none; }
+nav a[aria-current="page"] { color: var(--text); }
+.more { font-weight: 700; text-decoration: none; }
+.more:hover { text-decoration: underline; }
+.how-intro { text-align: center; padding: 50px 0 10px; }
+.how-intro h1 { font-size: clamp(36px, 7vw, 56px); margin: 0 0 12px; font-weight: 900; letter-spacing: -0.02em; }
+.diagram { margin: 20px 0 10px; background: var(--panel); border: 1px solid #262633; border-radius: 18px; padding: 18px; }
+.diagram svg { display: block; width: 100%; height: auto; }
+.diagram svg.tall { display: none; max-width: 420px; margin: 0 auto; }
+@media (max-width: 700px) { .diagram svg.wide { display: none; } .diagram svg.tall { display: block; } .diagram { padding: 10px; } }
+.diagram .lan { fill: none; stroke: #3a3a4a; stroke-width: 2; stroke-dasharray: 8 6; }
+.diagram .cloud { fill: var(--panel-2); stroke: #4b4b5c; stroke-width: 1.5; }
+.diagram .box { fill: var(--panel-2); stroke: #3a3a4a; stroke-width: 1.5; }
+.diagram .box.pc { fill: #241a45; stroke: var(--accent); stroke-width: 2.5; }
+.diagram .box.phone { stroke: var(--accent-hi); }
+.diagram text { fill: var(--text); font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+.diagram .t-title { font-size: 19px; font-weight: 800; }
+.diagram .t-sub { font-size: 15px; fill: var(--muted); }
+.diagram .t-item { font-size: 16px; fill: #d4d4de; }
+.diagram .t-small { font-size: 15px; font-weight: 700; fill: var(--muted); }
+.diagram .t-lan { font-size: 14px; font-weight: 700; fill: #7c7c90; letter-spacing: 0.06em; text-transform: uppercase; }
+.diagram .t-label { font-size: 14px; font-weight: 700; fill: var(--accent-hi); }
+.diagram .t-label.cmd { fill: #34d399; }
+.diagram .flow { stroke: var(--accent-hi); stroke-width: 3; }
+.diagram .flow-cmd { stroke: #34d399; stroke-width: 2.5; stroke-dasharray: 6 5; }
+.diagram .flow-opt { stroke: #6b6b80; stroke-width: 2; stroke-dasharray: 3 5; }
+.diagram .arrow-head { fill: var(--accent-hi); }
+.diagram .arrow-head2 { fill: #34d399; }
+.diagram figcaption { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+.key { display: inline-flex; align-items: center; gap: 8px; }
+.key i { display: inline-block; width: 28px; height: 0; border-top: 3px solid var(--accent-hi); }
+.key i.k-cmd { border-top: 3px dashed #34d399; }
+.key i.k-opt { border-top: 2px dotted #6b6b80; }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; padding: 30px 0; }
+.steps article { background: var(--panel); border: 1px solid #262633; border-radius: 14px; padding: 20px; }
+.steps h2 { display: flex; align-items: center; gap: 12px; font-size: 19px; margin: 0 0 8px; }
+.steps .n { flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 16px; }
+.steps p { margin: 0; color: #d4d4de; font-size: 15px; }
+.steps .private .n { background: #059669; }
+.how-cta { text-align: center; padding: 10px 0 50px; }
+/* Easter egg, comme dans l'application : le « 3 » de S3btify lance l'intro Agile */
+.egg { cursor: pointer; transition: color .2s; }
+.egg:hover { color: var(--accent-hi); }
+.intro { position: fixed; inset: 0; z-index: 200; background: #000; display: flex; flex-direction: column; cursor: pointer; }
+.intro.hidden { display: none; }
+.intro iframe { flex: 1; width: 100%; border: 0; }
+.intro-hint { color: #6f6f9f; font-size: 12px; text-align: center; padding: 6px 0 10px; letter-spacing: .05em; }
+body.elite .brand img { filter: hue-rotate(-40deg) saturate(1.4); }
+body.elite .brand .egg { color: #3b82f6; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 210; max-width: min(520px, calc(100% - 32px));
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--amiga); border-radius: 12px; padding: 12px 18px;
+  box-shadow: 0 8px 30px #0008; font-weight: 600; text-align: center; }
+.toast.hidden { display: none; }
+/* Page Guides : iPhone, accès à distance (tunnel Cloudflare) */
+.toc { color: var(--muted); }
+.toc a { font-weight: 700; text-decoration: none; }
+.guide-part { padding: 40px 0 10px; border-top: 1px solid #23232e; scroll-margin-top: 10px; }
+.guide-part h2 { font-size: 28px; }
+.guide-part > p { color: #d4d4de; max-width: 780px; }
+.step-t { display: flex; align-items: center; gap: 12px; font-size: 20px; margin: 30px 0 6px; }
+.step-t .n { flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 16px; }
+.howto { margin: 8px 0 8px; padding-left: 22px; max-width: 820px; }
+.howto li { margin: 0 0 10px; color: #d4d4de; padding-left: 4px; }
+.howto li::marker { color: var(--accent-hi); font-weight: 800; }
+.guide .note { color: var(--muted); font-size: 14px; max-width: 820px; }
+.guide .note.warn { border-left: 3px solid #f59e0b; padding-left: 12px; color: #e8d6b0; }
+.callout { background: var(--panel); border: 1px solid #262633; border-radius: 14px; padding: 18px 22px; margin: 20px 0; max-width: 860px; }
+.callout h3 { margin: 0 0 8px; font-size: 18px; }
+.callout ul { margin: 0; padding-left: 20px; color: #d4d4de; }
+.callout li { margin: 0 0 8px; }
+.callout.private { border-color: #065f46; background: linear-gradient(160deg, #052e25, var(--panel) 70%); }
+.fields { border-collapse: collapse; margin: 10px 0 14px; background: var(--panel); border-radius: 12px; overflow: hidden; max-width: 680px; width: 100%; }
+.fields th, .fields td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #262633; vertical-align: top; font-size: 15px; }
+.fields th { color: var(--muted); font-weight: 700; width: 38%; white-space: nowrap; }
+.fields tr:last-child th, .fields tr:last-child td { border-bottom: 0; }
+@media (max-width: 600px) { .fields th { white-space: normal; } .guide-part h2 { font-size: 24px; } }
+/* Second schéma : accès à distance par un tunnel Cloudflare */
+.remote-how { padding: 40px 0 10px; border-top: 1px solid #23232e; scroll-margin-top: 10px; }
+.remote-how > h2 { font-size: 30px; text-align: center; }
+.remote-how > .lead { text-align: center; }
+.diagram .net { fill: #0f1424; stroke: #2b3a5c; stroke-width: 2; stroke-dasharray: 2 6; }
+.diagram .box.inner { fill: #2f2357; stroke: var(--accent-hi); stroke-width: 1.5; }
+.diagram .box.cf { fill: #3a2610; stroke: #f59e0b; stroke-width: 2.5; }
+.diagram .box.cf-inner { fill: #2e2112; stroke: #f59e0b; stroke-width: 1.5; }
+.diagram .flow-tunnel { stroke: #f59e0b; stroke-width: 9; stroke-linecap: round; opacity: .85; }
+.diagram .t-label.tunnel { fill: #fbbf24; }
+.diagram .t-addr { font-size: 13px; font-weight: 700; fill: #34d399; font-family: Consolas, "Courier New", monospace; }
+.key i.k-tunnel { border-top: 6px solid #f59e0b; border-radius: 3px; }
+.how-guide { text-align: center; margin: 0 0 10px; }
+/* Page Nouveautés : notes de version (bloc FR ou EN selon la langue choisie) */
+html[lang="en"] .rn-fr, html[lang="fr"] .rn-en { display: none; }
+.rn { max-width: 860px; margin: 0 auto; padding: 10px 0 30px; }
+.rn-ver { display: flex; align-items: baseline; gap: 14px; font-size: 24px; margin: 34px 0 10px; padding-top: 18px; border-top: 1px solid #23232e; }
+.rn-date { color: var(--muted); font-size: 14px; font-weight: 600; }
+.rn-list { margin: 0; padding-left: 22px; color: #d4d4de; }
+.rn-list li { margin: 0 0 8px; }
+.rn-list li::marker { color: var(--accent-hi); }

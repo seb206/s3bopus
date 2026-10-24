@@ -1,0 +1,11 @@
+bin/
+obj/
+*.zip
+linux/bin/
+linux/obj/
+linux/publish/
+linux/*.deb
+
+site/static/downloads/
+linux/*.rpm
+S3bopus/

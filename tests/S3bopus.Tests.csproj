@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>S3bopus</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="SharpCompress" Version="0.50.7" />
+    <!-- Code testé : partagé (archives, historique) et moteur de la version Linux (réglages, file de transferts) -->
+    <Compile Include="../shared/*.cs" Link="shared/%(Filename)%(Extension)" />
+    <Compile Include="../linux/Core.cs" Link="linux/Core.cs" />
+  </ItemGroup>
+</Project>

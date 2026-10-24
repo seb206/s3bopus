@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>S3bopus</AssemblyName>
+    <RootNamespace>S3bopus</RootNamespace>
+    <ApplicationIcon>S3bopus.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <Version>0.0.2</Version>
+    <Product>S3bopus</Product>
+    <Description>Explorateur de fichiers double panneau</Description>
+    <Copyright>S3bopus</Copyright>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <!-- Version légère : dotnet build -c Release -p:Light=true -p:OutputPath=bin\Light\ -p:IntermediateOutputPath=obj\light\ (ZIP seulement, via le .NET Framework) -->
+  <PropertyGroup Condition="'$(Light)' == 'true'">
+    <DefineConstants>$(DefineConstants);LIGHT</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Light)' == 'true'">
+    <Reference Include="System.IO.Compression" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Light)' != 'true'">
+    <PackageReference Include="SharpCompress" Version="0.50.7" />
+    <!-- Versions alignées sur celles que demande SharpCompress : une seule copie de chaque DLL intégrée dans l exe -->
+    <PackageReference Include="System.Buffers" Version="4.6.1" />
+    <PackageReference Include="System.Memory" Version="4.6.3" />
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <EmbeddedResource Include="S3bopus.ico" LogicalName="S3bopus.ico" />
+    <Compile Include="..\shared\*.cs" Link="shared\%(Filename)%(Extension)" />
+  </ItemGroup>
+  <!-- DLL des paquets intégrées dans l'exe (chargées par Program.LoadEmbedded) : S3bopus reste un seul fichier -->
+  <Target Name="EmbedDependencies" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <EmbeddedResource Include="@(ReferenceCopyLocalPaths)" Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll'">
+        <LogicalName>deps.%(ReferenceCopyLocalPaths.Filename).dll</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
+</Project>

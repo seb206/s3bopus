@@ -1,0 +1,12 @@
+# Ajouté au Caddyfile de s3btify.com par « import » (voir ct_update.sh) : le site S3bopus vit sous /s3bopus.
+# Fichiers dans /usr/share/caddy/s3bopus, compteur propre à S3bopus sur 127.0.0.1:8091.
+handle /s3bopus/count* {
+	uri strip_prefix /s3bopus
+	reverse_proxy 127.0.0.1:8091
+}
+
+@bopus_downloads path /s3bopus/downloads/*
+header @bopus_downloads Content-Disposition attachment
+
+@bopus_page path /s3bopus /s3bopus/ /s3bopus/index.html /s3bopus/app.js /s3bopus/style.css
+header @bopus_page Cache-Control "no-cache"
