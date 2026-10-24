@@ -97,6 +97,7 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
         if UserDefaults.standard.object(forKey: "NSSplitView Subview Frames S3bopusPanes") == nil {
             panesSplit.setPosition(panesSplit.bounds.width / 2, ofDividerAt: 0)
         }
+        showQueue(Settings.bool("QueueVisible", true))
         leftTabs.current.activate()
         leftTabs.current.focusList()
     }
@@ -266,13 +267,19 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
             outerSplit.removeArrangedSubview(queuePanel)
             queuePanel.removeFromSuperview()
         } else {
+            let h = max(120, min(queueHeight, outerSplit.bounds.height / 2))
+            queuePanel.frame = NSRect(x: 0, y: 0, width: outerSplit.bounds.width, height: h)
             outerSplit.addArrangedSubview(queuePanel)
             outerSplit.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
-            outerSplit.layoutSubtreeIfNeeded()
-            let h = max(120, min(queueHeight, outerSplit.bounds.height / 2))
-            outerSplit.setPosition(outerSplit.bounds.height - h, ofDividerAt: 0)
+            // Le split n'a pas encore sa taille définitive pendant le démarrage : on fixe le diviseur après le layout
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, !self.queuePanel.isHidden else { return }
+                self.outerSplit.layoutSubtreeIfNeeded()
+                self.outerSplit.setPosition(self.outerSplit.bounds.height - h, ofDividerAt: 0)
+            }
         }
         queueItem?.state = show ? .on : .off
+        if show { queuePanel.refresh() }
     }
 
     // ======================================================================= actions (menus, boutons)
@@ -384,6 +391,7 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
         Settings.set("ShowHidden", FilePane.showHidden)
         Settings.set("AutoSizes", FilePane.autoSizes)
         Settings.set("FKeys", !fkeyBar.isHidden)
+        Settings.set("QueueVisible", !queuePanel.isHidden)
         Settings.set("QueueHeight", Int(queuePanel.isHidden ? queueHeight : queuePanel.frame.height))
         for (side, tabs) in [("Left", leftTabs), ("Right", rightTabs)] {
             Settings.set(side + "Tabs", tabs.panes.map { $0.currentPath })

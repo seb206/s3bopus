@@ -5,6 +5,7 @@ final class QueuePanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private let table = NSTableView()
     private var rows: [TransferJob] = []
     private let pauseButton = NSButton()
+    private let emptyLabel = NSTextField(labelWithString: Lang.T("Aucun transfert — F5 copie, F6 déplace vers l'autre panneau", "No transfers — F5 copies, F6 moves to the other pane"))
     var onClose: (() -> Void)?
     var onOpenFolder: ((String) -> Void)?
 
@@ -65,6 +66,14 @@ final class QueuePanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
             scroll.leadingAnchor.constraint(equalTo: stack.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: stack.trailingAnchor)
         ])
         scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
+
+        emptyLabel.textColor = .secondaryLabelColor
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(emptyLabel)
+        NSLayoutConstraint.activate([
+            emptyLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor, constant: 8)
+        ])
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -91,6 +100,7 @@ final class QueuePanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let sel = selected
         rows = queue.allJobs
         table.reloadData()
+        emptyLabel.isHidden = !rows.isEmpty
         if let s = sel, let i = rows.firstIndex(where: { $0 === s }) { table.selectRowIndexes([i], byExtendingSelection: false) }
         pauseButton.title = queue.paused ? Lang.T("Reprendre", "Resume") : Lang.T("Pause", "Pause")
     }
