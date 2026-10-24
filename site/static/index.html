@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>S3bopus — Un gestionnaire de fichiers à deux panneaux, avec une vraie file d'attente</title>
-  <meta name="description" content="Explorateur de fichiers léger à deux panneaux pour Windows et Linux, inspiré de Directory Opus sur Amiga : taille des dossiers et vraie file de copie.">
+  <meta name="description" content="Explorateur de fichiers léger à deux panneaux pour Windows, Mac et Linux, inspiré de Directory Opus sur Amiga : taille des dossiers et vraie file de copie.">
   <link rel="icon" href="icon.png">
   <link rel="stylesheet" href="style.css?v=1">
 </head>
@@ -23,16 +23,24 @@
     <section class="hero">
       <h1>S3bopus</h1>
       <p class="tagline" data-i18n="tagline">Deux panneaux, une file d'attente, et rien d'autre.</p>
-      <p class="lead" data-i18n="lead">Un gestionnaire de fichiers à deux panneaux, léger et portable, pour Windows et Linux, dans l'esprit de Directory Opus sur Amiga.</p>
+      <p class="lead" data-i18n="lead">Un gestionnaire de fichiers à deux panneaux, léger et portable, pour Windows, Mac et Linux, dans l'esprit de Directory Opus sur Amiga.</p>
       <a class="cta" href="#download" data-i18n="cta">Télécharger gratuitement</a>
       <p class="version"><span data-i18n="version">Version</span> 0.0.2</p>
     </section>
 
+    <section class="screens">
+      <figure class="shot wide">
+        <img src="img/apercu.png" width="1675" height="1597" alt="S3bopus : deux panneaux avec onglets, tailles des dossiers, file de transferts et barre des touches de fonction" data-i18n-alt="shot_alt" loading="lazy">
+        <figcaption data-i18n="shot">Deux panneaux, des onglets de chaque côté, la taille des dossiers, la file de transferts et la barre des touches de fonction en bas.</figcaption>
+      </figure>
+    </section>
+
     <section id="about" class="about">
       <h2 data-i18n="nav_about">À propos</h2>
-      <p data-i18n="p1">S3bopus est né d'une frustration : autant sous Linux que sur PC, le gestionnaire de fichiers est franchement nul. Pas de vraie file d'attente : sous Windows il y a enfin la pause (whoooooau !), mais tout se copie en même temps et c'est la catastrophe. Et impossible de coller directement dans l'Explorateur un texte ou une image du presse-papiers pour en faire un fichier.</p>
+      <p data-i18n="p1">S3bopus est né d'une frustration : autant sous Linux que sur PC, le gestionnaire de fichiers est franchement nul. Pas de vraie file d'attente : sous Windows il y a enfin la pause (whoooooau !), mais tout se copie en même temps et c'est la catastrophe.</p>
+      <p data-i18n="p1b">Et ce n'est pas tout : en 2026, l'Explorateur de Windows est toujours incapable de coller une image qui se trouve dans le presse-papiers. Une capture d'écran copiée, un Ctrl+V dans un dossier… et rien. Microsoft sait fabriquer un système d'exploitation entier, mais pas transformer une image copiée en fichier : une aberration. Idem pour le texte copié. Dans S3bopus, Ctrl+V crée le fichier pour de bon : une image devient un .jpg, un texte (et tout ce qui y ressemble) devient un .txt.</p>
       <p data-i18n="p2">S3bopus reprend les points essentiels de Directory Opus sur Amiga : la taille des répertoires, et un vrai gestionnaire de copie. Les transferts passent un par un dans une file, avec progression, pause, reprise, annulation et gestion des conflits.</p>
-      <p data-i18n="p3">Et il est hyper portable : un seul petit fichier, sans installation, qu'on pose n'importe où sur le PC. Sous Linux, un paquet .deb ou .rpm.</p>
+      <p data-i18n="p3">Et il est hyper portable : un seul petit fichier, sans installation, qu'on pose n'importe où sur le PC. Sous Linux, un paquet .deb ou .rpm ; sous Mac, une vraie application native.</p>
       <div class="cards">
         <article>
           <h3 data-i18n="h1">Taille des dossiers</h3>
@@ -82,6 +90,13 @@
           <a class="button" href="downloads/s3bopus-0.0.2-1.x86_64.rpm" data-count="rpm" download><span data-i18n="dl_rpm">Télécharger le paquet .rpm</span></a>
           <p class="meta">s3bopus-0.0.2-1.x86_64.rpm · 38.9 Mo · SHA-256 1199d3a2a406f70ed48f73c4941373955640b87e1d36beab1824de73555d1e2d</p>
           <p class="note"><code>sudo dnf install ./s3bopus-*.rpm</code></p>
+        </div>
+        <div class="dl">
+          <h3>Mac</h3>
+          <p data-i18n="mac_req">macOS 13 ou plus, Apple Silicon et Intel. Application native, ouvrez l'image disque et glissez S3bopus dans Applications.</p>
+          <a class="button" href="downloads/S3bopus-0.0.2-mac.dmg" data-count="mac" download><span data-i18n="dl_mac">Télécharger pour Mac</span></a>
+          <p class="meta">S3bopus-0.0.2-mac.dmg · 0.9 Mo · SHA-256 0e30f54f61faf8a9febd1370482a1b7195be2bb251af4ab501e1b39b74a74d59</p>
+          <p class="note" data-i18n="mac_note">Programme non signé : au premier lancement, clic droit sur S3bopus puis Ouvrir. Les archives ne sont pas encore gérées.</p>
         </div>
       </div>
     </section>

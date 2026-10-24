@@ -43,6 +43,7 @@ foreach ($f in Get-ChildItem $web -File) {
     else { Copy-Item $f.FullName "$stage\site\www\" }
 }
 Copy-Item "$web\downloads" "$stage\site\www\downloads" -Recurse
+Copy-Item "$web\img" "$stage\site\www\img" -Recurse
 Copy-Lf "$root\site\counter\counter.py" "$stage\site\counter.py"
 Copy-Lf "$root\site\deploy\s3bopus.caddy" "$stage\site\s3bopus.caddy"
 & "$env:SystemRoot\System32\tar.exe" -czf "$stage\site.tgz" -C "$stage" site

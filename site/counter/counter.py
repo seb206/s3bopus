@@ -33,7 +33,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-DOWNLOADS = ("win", "winlight", "deb", "rpm")
+DOWNLOADS = ("win", "winlight", "deb", "rpm", "mac")
 CONTACT = "sysop@s3btify.com"
 CAPTCHA_SECONDS = 600
 MAX_BODY = 1024
