@@ -6,13 +6,15 @@
 #    où site\deploy\ct_update.sh installe :
 #    site dans /usr/share/caddy/s3bopus, compteur (service s3bopus-counter, port 8091), « import » ajouté au Caddyfile
 #    (sauvegardé et validé avant le rechargement). Le site et le compteur de S3btify ne sont pas touchés.
-# Prérequis : OpenSSH (Windows 11). Le mot de passe root est demandé deux fois (scp puis ssh) sans clé SSH.
+# Prérequis : OpenSSH (Windows 11). Clé SSH (par défaut ~\.ssh\id_ed25519-proxmox) autorisée sur l'hôte Proxmox.
 param(
     [string]$Server = "root@192.168.6.94",   # hôte Proxmox
     [int]$Container = 212,                    # conteneur LXC de S3btify (Caddy)
+    [string]$Key = "$env:USERPROFILE\.ssh\id_ed25519-proxmox",   # clé SSH vers Proxmox
     [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
+$sshOpts = "-i", $Key, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes"
 $root = $PSScriptRoot
 $web = "$root\site\static"
 $index = [IO.File]::ReadAllText("$web\index.html")
@@ -56,11 +58,11 @@ Get-ChildItem -Recurse -File $stage | ForEach-Object { "   {0,-30} {1,9:N0} Ko" 
 if ($DryRun) { Write-Host "Essai à blanc : rien n'a été envoyé ($stage)"; return }
 
 Write-Host "== Copie vers $Server"
-& ssh.exe $Server "rm -rf /tmp/s3bopus-deploy"
-& scp.exe -r $stage "${Server}:/tmp/"
+& ssh.exe @sshOpts $Server "rm -rf /tmp/s3bopus-deploy"
+& scp.exe @sshOpts -r $stage "${Server}:/tmp/"
 if ($LASTEXITCODE -ne 0) { throw "scp a échoué" }
 Write-Host "== Installation dans le conteneur $Container"
-& ssh.exe $Server "bash /tmp/s3bopus-deploy/host_update.sh $Container"
+& ssh.exe @sshOpts $Server "bash /tmp/s3bopus-deploy/host_update.sh $Container"
 if ($LASTEXITCODE -ne 0) { throw "L'installation sur le serveur a échoué (voir les messages ci-dessus)" }
 Remove-Item -Recurse -Force $stage
 Write-Host "== Terminé : https://s3btify.com/s3bopus/"
