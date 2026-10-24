@@ -205,8 +205,10 @@ static int tar_header(gzFile f, AEnt *a, long long *left) {
             if (type == 'L') snprintf(longname, sizeof longname, "%s", d);
             else if (type == 'x')
                 for (char *q = d; q < d + size;) {  // lignes « longueur clé=valeur\n »
-                    char *sp = strchr(q, ' '); long l = atol(q);
-                    if (!sp || l <= 0) break;
+                    char *sp = strchr(q, ' '); long l = 0;
+                    if (!sp) break;
+                    for (const char *dg = q; dg < sp && *dg >= '0' && *dg <= '9'; dg++) l = l * 10 + (*dg - '0');  // pas atol : il tire glibc 2.38
+                    if (l <= 0) break;
                     if (!strncmp(sp + 1, "path=", 5)) { long m = l - (sp - q) - 7; if (m < 0) m = 0; if (m > ANAME - 1) m = ANAME - 1; memcpy(longname, sp + 6, m); longname[m] = 0; }
                     q += l;
                 }
