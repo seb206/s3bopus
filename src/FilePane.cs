@@ -342,12 +342,16 @@ namespace S3bopus
                 try
                 {
                     if (path.Length == 2 && path[1] == ':') path += "\\";
-                    path = Path.GetFullPath(path);
-                    if (path.EndsWith("\\") && Path.GetPathRoot(path) != path) path = path.TrimEnd('\\');
+                    if (IsServer(path.TrimEnd('\\'))) path = path.TrimEnd('\\'); // GetFullPath refuse \\serveur
+                    else
+                    {
+                        path = Path.GetFullPath(path);
+                        if (path.EndsWith("\\") && Path.GetPathRoot(path) != path) path = path.TrimEnd('\\');
+                    }
                 }
                 catch (Exception ex) { MessageBox.Show(FindForm(), ex.Message, "S3bopus", MessageBoxButtons.OK, MessageBoxIcon.Warning); _address.Path = CurrentPath; return false; }
 
-                if (!Directory.Exists(path) && !Archives.Split(path, out archive, out inner))
+                if (!IsServer(path) && !Directory.Exists(path) && !Archives.Split(path, out archive, out inner))
                 {
                     if (File.Exists(path)) { select = path; path = Path.GetDirectoryName(path); }
                     else
@@ -398,10 +402,15 @@ namespace S3bopus
             Navigate(_fwd.Pop(), false);
         }
 
+        /// <summary>\\serveur sans partage : on liste les partages (NetShareEnum).</summary>
+        static bool IsServer(string p) => p.Length > 2 && p.StartsWith(@"\\") && p.IndexOf('\\', 2) < 0 && p[2] != '?';
+
         public void GoUp()
         {
             if (IsThisPC) return;
             string parent = Path.GetDirectoryName(CurrentPath);
+            if (parent == null && CurrentPath.StartsWith(@"\\") && !IsServer(CurrentPath) && CurrentPath.IndexOf('\\', 2) > 0 && CurrentPath.IndexOf('\\', CurrentPath.IndexOf('\\', 2) + 1) < 0)
+                parent = CurrentPath.Substring(0, CurrentPath.IndexOf('\\', 2));
             Navigate(string.IsNullOrEmpty(parent) ? AddressBar.ThisPC : parent, true, CurrentPath);
         }
 
@@ -414,7 +423,7 @@ namespace S3bopus
         void SetupWatcher()
         {
             if (_watcher != null) { _watcher.EnableRaisingEvents = false; _watcher.Dispose(); _watcher = null; }
-            if (IsThisPC || IsArchive) return;
+            if (IsThisPC || IsArchive || IsServer(CurrentPath)) return;
             try
             {
                 _watcher = new FileSystemWatcher(CurrentPath)
@@ -452,7 +461,7 @@ namespace S3bopus
 
             string archive = _archiveFile, inner = _archiveInner;
             var ui = TaskScheduler.FromCurrentSynchronizationContext();
-            Task.Run(() => path == AddressBar.ThisPC ? LoadDrives() : archive != null ? LoadArchive(archive, inner, path) : LoadFolder(path, hidden)).ContinueWith(t =>
+            Task.Run(() => path == AddressBar.ThisPC ? LoadDrives() : IsServer(path) ? LoadShares(path) : archive != null ? LoadArchive(archive, inner, path) : LoadFolder(path, hidden)).ContinueWith(t =>
             {
                 if (gen != _gen || IsDisposed) return;
                 if (t.IsFaulted)
@@ -474,8 +483,16 @@ namespace S3bopus
                 if (_pendingSelect != null) { selectPath = _pendingSelect; _pendingSelect = null; }
                 ApplyView(keep, selectPath ?? focused, topIndex);
                 if (_pendingEdit) { _pendingEdit = false; BeginRename(); }
-                if (AutoSizes && !keepSelection && !IsThisPC) ComputeSizes(false);
+                if (AutoSizes && !keepSelection && !IsThisPC && !IsServer(path)) ComputeSizes(false);
             }, ui);
+        }
+
+        static List<Entry> LoadShares(string server)
+        {
+            var list = new List<Entry>();
+            foreach (var n in Native.Shares(server))
+                list.Add(new Entry { Name = n, FullPath = server + "\\" + n, IsDir = true, Size = -1, Attributes = FileAttributes.Directory });
+            return list;
         }
 
         static List<Entry> LoadFolder(string path, bool showHidden)

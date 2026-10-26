@@ -30,8 +30,8 @@ namespace S3bopus
             try { Icon = new Icon(typeof(MainForm).Assembly.GetManifestResourceStream("S3bopus.ico")); } catch { }
             MinimumSize = new Size(Ui.S(640), Ui.S(400));
 
-            FilePane.ShowHidden = Settings.GetBool("ShowHidden", false);
-            FilePane.AutoSizes = Settings.GetBool("AutoSizes", false);
+            FilePane.ShowHidden = Settings.GetBool("ShowHidden", true);
+            FilePane.AutoSizes = Settings.GetBool("AutoSizes", true);
 
             // ---- Barre de commandes (style Explorateur Windows 11)
             _commands = new ToolStrip
@@ -187,6 +187,7 @@ namespace S3bopus
                 _ratio = Settings.GetInt("Split", 500) / 1000.0;
                 ApplyRatio();
                 _queueHeight = Settings.GetInt("QueueHeight", Ui.S(200));
+                if (Settings.GetBool("Queue", true)) ShowQueue(true);
                 RestoreTabs(_leftTabs, "Left", leftPath, args.Length > 0);
                 RestoreTabs(_rightTabs, "Right", rightPath, args.Length > 1);
                 SetActive(_left);
@@ -349,8 +350,7 @@ namespace S3bopus
 
         void About()
         {
-            MessageBox.Show(this,
-                "S3bopus " + Application.ProductVersion + " — 2026-10-23\n\n" + (Lang.En ?
+            string text ="S3bopus " + Application.ProductVersion + " — 2026-10-23\n\n" + (Lang.En ?
                 "Lightweight dual-pane file manager.\n\n" +
                 "Shortcuts:\n" +
                 "  Tab  switch pane\n" +
@@ -378,8 +378,24 @@ namespace S3bopus
                 "  Ctrl+U  échanger les panneaux      Ctrl+=  même dossier\n" +
                 "  Ctrl+N / Ctrl+W  nouvel onglet / fermer      Ctrl+Tab  onglet suivant\n" +
                 "  Retour arrière  dossier parent\n" +
-                "  Clic molette sur un dossier  l'ouvrir dans l'autre panneau"),
-                Lang.T("À propos de S3bopus", "About S3bopus"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                "  Clic molette sur un dossier  l'ouvrir dans l'autre panneau");
+            ShowAbout(text);
+        }
+
+        /// <summary>Boîte À propos aux couleurs du thème (MessageBox ignore le mode sombre).</summary>
+        void ShowAbout(string text)
+        {
+            using (var f = new Form { Text = Lang.T("À propos de S3bopus", "About S3bopus"), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, BackColor = Ui.Back, ForeColor = Ui.Fore, Font = Ui.Font, ClientSize = new Size(Ui.S(520), Ui.S(430)) })
+            {
+                var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, FlatStyle = FlatStyle.Flat, BackColor = Ui.Hover, ForeColor = Ui.Fore, Size = new Size(Ui.S(90), Ui.S(28)), Dock = DockStyle.None };
+                ok.FlatAppearance.BorderColor = Ui.Border;
+                ok.Location = new Point(f.ClientSize.Width - ok.Width - Ui.S(16), f.ClientSize.Height - ok.Height - Ui.S(14));
+                var lbl = new Label { Text = text, AutoSize = false, Location = new Point(Ui.S(20), Ui.S(16)), Size = new Size(f.ClientSize.Width - Ui.S(40), f.ClientSize.Height - Ui.S(70)), ForeColor = Ui.Fore, BackColor = Ui.Back };
+                f.Controls.AddRange(new Control[] { lbl, ok });
+                f.AcceptButton = f.CancelButton = ok;
+                f.ShowDialog(this);
+            }
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -463,6 +479,7 @@ namespace S3bopus
             Settings.Set("RightSort", _right.SortColumn);
             Settings.Set("RightAsc", _right.SortAscending);
             Settings.Set("Split", (int)(_ratio * 1000));
+            Settings.Set("Queue", !_outer.Panel2Collapsed);
             Settings.Set("QueueHeight", _outer.Panel2Collapsed ? _queueHeight : _outer.Panel2.Height);
             Settings.Set("ShowHidden", FilePane.ShowHidden);
             Settings.Set("AutoSizes", FilePane.AutoSizes);

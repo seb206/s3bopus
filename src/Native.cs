@@ -280,6 +280,29 @@ namespace S3bopus
         }
 
         /// <summary>Énumère un dossier via FindFirstFileEx (bien plus rapide que DirectoryInfo).</summary>
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        static extern int NetShareEnum(string server, int level, out IntPtr buf, int max, out int read, out int total, ref int resume);
+        [DllImport("netapi32.dll")] static extern int NetApiBufferFree(IntPtr buf);
+
+        /// <summary>Partages disques d'un serveur (\\serveur) ; lève Win32Exception si injoignable.</summary>
+        public static List<string> Shares(string server)
+        {
+            int resume = 0, err = NetShareEnum(server, 1, out IntPtr buf, -1, out int read, out int _, ref resume);
+            if (err != 0 && err != 234) throw new System.ComponentModel.Win32Exception(err);
+            var list = new List<string>();
+            try
+            {
+                for (int i = 0; i < read; i++)
+                {
+                    IntPtr item = buf + i * (IntPtr.Size * 2 + 8); // SHARE_INFO_1 : name, type, remark
+                    uint type = (uint)Marshal.ReadInt32(item, IntPtr.Size);
+                    if ((type & 0xFF) == 0) list.Add(Marshal.PtrToStringUni(Marshal.ReadIntPtr(item))); // STYPE_DISKTREE
+                }
+            }
+            finally { NetApiBufferFree(buf); }
+            return list;
+        }
+
         public static IEnumerable<FindEntry> Enumerate(string dir)
         {
             string pattern = LongPath(Path.Combine(dir, "*"));

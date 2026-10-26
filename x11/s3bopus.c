@@ -564,8 +564,26 @@ static int W = 1100, H = 700, rh, asc;
 static XIM xim; static XIC xic;
 
 enum { C_BG, C_PANEL, C_TEXT, C_DIM, C_DIR, C_SELROW, C_CURROW, C_MARK, C_BAR, C_LINE, C_OK, C_ERR, NCOL };
-static const unsigned RGB[NCOL] = {0x1e1e1e, 0x252526, 0xd4d4d4, 0x8a8a8a, 0x7fb4ff, 0x2a2d2e, 0x094771, 0xe5c07b, 0x3a96dd, 0x3c3c3c, 0x4ec9b0, 0xf14c4c};
+static const unsigned RGB[2][NCOL] = {
+    {0x1e1e1e, 0x252526, 0xd4d4d4, 0x8a8a8a, 0x7fb4ff, 0x2a2d2e, 0x094771, 0xe5c07b, 0x3a96dd, 0x3c3c3c, 0x4ec9b0, 0xf14c4c},
+    {0xffffff, 0xf0f0f0, 0x1e1e1e, 0x6a6a6a, 0x0b5cad, 0xebebeb, 0xcce4ff, 0xb35c00, 0x3a96dd, 0xd0d0d0, 0x1a7f5a, 0xc62828}};
+static int LIGHT;
 static XftColor XC[NCOL]; static unsigned long PX[NCOL];
+static void set_theme(void) {
+    for (int i = 0; i < NCOL; i++) {
+        unsigned c = RGB[LIGHT][i];
+        XRenderColor rc = {((c >> 16) & 255) * 257, ((c >> 8) & 255) * 257, (c & 255) * 257, 0xffff};
+        XftColorAllocValue(dpy, vis, cmap, &rc, &XC[i]); PX[i] = XC[i].pixel;
+    }
+}
+// Préférences (langue, thème) dans ~/.config/s3bopus.conf
+static void conf_path(char *b, size_t n) { const char *h = getenv("HOME"); snprintf(b, n, "%s/.config/s3bopus.conf", h ? h : "/tmp"); }
+static void conf_save(void) { char b[PATH_MAX]; conf_path(b, sizeof b); FILE *f = fopen(b, "w"); if (f) { fprintf(f, "lang=%s\ntheme=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark"); fclose(f); } }
+static void conf_load(void) {
+    char b[PATH_MAX], l[64]; conf_path(b, sizeof b); FILE *f = fopen(b, "r"); if (!f) return;
+    while (fgets(l, sizeof l, f)) { if (!strncmp(l, "lang=en", 7)) EN = 1; else if (!strncmp(l, "lang=fr", 7)) EN = 0; else if (!strncmp(l, "theme=light", 11)) LIGHT = 1; else if (!strncmp(l, "theme=dark", 10)) LIGHT = 0; }
+    fclose(f);
+}
 
 static void rect(int x, int y, int w, int h, int c) { if (w > 0 && h > 0) { XSetForeground(dpy, gc, PX[c]); XFillRectangle(dpy, pix, gc, x, y, w, h); } }
 static int text_w(const char *s) { XGlyphInfo g; XftTextExtentsUtf8(dpy, font, (const FcChar8 *)s, strlen(s), &g); return g.xOff; }
@@ -682,12 +700,17 @@ static void draw(void) {
     }
     const char *keys[] = {"F2 ", "F5 ", "F6 ", "F7 ", "F8 ", "F10 "};
     const char *lab[] = {T("Renommer", "Rename"), T("Copier", "Copy"), T("Déplacer", "Move"), T("Dossier", "New folder"), T("Supprimer", "Delete"), T("Quitter", "Quit")};
-    int fy = H - rh - 2, fw = W / 6;
+    int fy = H - rh - 2, fw = (W - 190) / 6;
     rect(0, fy, W, rh + 2, C_PANEL);
     for (int i = 0; i < 6; i++) {
         text(i * fw + 8, fy + 1, C_MARK, keys[i]);
         text(i * fw + 8 + text_w(keys[i]), fy + 1, C_TEXT, lab[i]);
     }
+    // boutons langue et thème, à droite
+    rect(W - 186, fy + 2, 40, rh - 2, !EN ? C_CURROW : C_SELROW); text(W - 186 + (40 - text_w("FR")) / 2, fy + 1, C_TEXT, "FR");
+    rect(W - 142, fy + 2, 40, rh - 2, EN ? C_CURROW : C_SELROW); text(W - 142 + (40 - text_w("EN")) / 2, fy + 1, C_TEXT, "EN");
+    const char *tl = LIGHT ? T("Clair", "Light") : T("Sombre", "Dark");
+    rect(W - 94, fy + 2, 90, rh - 2, C_SELROW); text(W - 94 + (90 - text_w(tl)) / 2, fy + 1, C_TEXT, tl);
     XCopyArea(dpy, pix, win, gc, 0, 0, W, H, 0, 0);
     dirty = 0;
 }
@@ -947,6 +970,12 @@ static void on_click(XButtonEvent *be) {
         dirty = 1; return;
     }
     if (be->button != Button1) return;
+    if (be->y >= H - rh - 2) {
+        if (be->x >= W - 186 && be->x < W - 146) EN = 0; else if (be->x >= W - 142 && be->x < W - 102) EN = 1;
+        else if (be->x >= W - 94) { LIGHT = !LIGHT; set_theme(); }
+        else return;
+        conf_save(); dirty = 1; return;
+    }
     active = p; dirty = 1;
     if (be->y < rh) {
         int tx = x + 2;
@@ -964,7 +993,7 @@ static void on_click(XButtonEvent *be) {
 
 int main(int argc, char **argv) {
     setlocale(LC_ALL, ""); signal(SIGCHLD, SIG_IGN); signal(SIGPIPE, SIG_IGN);
-    const char *lg = getenv("LANG"); EN = !(lg && !strncmp(lg, "fr", 2));
+    const char *lg = getenv("LANG"); EN = !(lg && !strncmp(lg, "fr", 2)); conf_load();
     if (argc > 1 && !strcmp(argv[1], "--version")) { printf("S3bopus %s (X11)\n", VERSION); return 0; }
     if (!(dpy = XOpenDisplay(NULL))) { fprintf(stderr, "S3bopus : pas d'affichage X11 (DISPLAY)\n"); return 1; }
     scr = DefaultScreen(dpy); vis = DefaultVisual(dpy, scr); cmap = DefaultColormap(dpy, scr);
@@ -972,10 +1001,7 @@ int main(int argc, char **argv) {
     if (!font) font = XftFontOpenName(dpy, scr, "monospace:size=10");
     if (!font) { fprintf(stderr, "S3bopus : aucune police\n"); return 1; }
     asc = font->ascent; rh = font->ascent + font->descent + 6;
-    for (int i = 0; i < NCOL; i++) {
-        XRenderColor rc = {((RGB[i] >> 16) & 255) * 257, ((RGB[i] >> 8) & 255) * 257, (RGB[i] & 255) * 257, 0xffff};
-        XftColorAllocValue(dpy, vis, cmap, &rc, &XC[i]); PX[i] = XC[i].pixel;
-    }
+    set_theme();
     win = XCreateSimpleWindow(dpy, RootWindow(dpy, scr), 0, 0, W, H, 0, 0, PX[C_BG]);
     XStoreName(dpy, win, "S3bopus " VERSION);
     XClassHint ch = {"s3bopus", "S3bopus"}; XSetClassHint(dpy, win, &ch);

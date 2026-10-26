@@ -3,7 +3,7 @@
 
 Python 3 seul (aucune dépendance). Écoute en local (127.0.0.1:8090) derrière Caddy :
   POST /count/hit        -> +1 visite,                      renvoie {"visits": n, "downloads": {...}}
-  POST /count/dl/<nom>   -> +1 téléchargement (win | winlight | deb | rpm), renvoie la même chose
+  POST /count/dl/<nom>   -> +1 téléchargement (win | winlight | deb | rpm | mac | linux), renvoie la même chose
   GET  /count            -> lecture seule
   GET  /count/captcha    -> {"id": ..., "image": "<svg…>"} : 5 chiffres dessinés (traits, pas du texte)
   POST /count/contact    -> {"id": ..., "answer": "12345"} : adresse e-mail de contact si la réponse est bonne
@@ -33,7 +33,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-DOWNLOADS = ("win", "winlight", "deb", "rpm", "mac")
+DOWNLOADS = ("win", "winlight", "deb", "rpm", "mac", "linux")
 CONTACT = "sysop@s3btify.com"
 CAPTCHA_SECONDS = 600
 MAX_BODY = 1024

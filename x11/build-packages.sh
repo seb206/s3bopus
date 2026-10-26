@@ -14,7 +14,8 @@ cat > "$R/usr/share/applications/s3bopus.desktop" <<D
 [Desktop Entry]
 Type=Application
 Name=S3bopus
-Comment=Explorateur de fichiers à deux panneaux
+Comment=Dual-pane file manager
+Comment[fr]=Explorateur de fichiers a deux panneaux
 Exec=s3bopus
 Icon=s3bopus
 Terminal=false
@@ -31,8 +32,8 @@ Depends: libc6, libx11-6, libxft2, zlib1g
 Recommends: xdg-utils, fonts-dejavu-core
 Section: utils
 Priority: optional
-Description: Explorateur de fichiers léger à deux panneaux (X11 natif)
- Deux panneaux, onglets, file de transferts, taille des dossiers, archives zip et tar.
+Description: Lightweight dual-pane file manager
+ Tabs, transfer queue, folder sizes, zip and tar archives.
 C
 dpkg-deb --root-owner-group -Zgzip --build "$R" "$HERE/s3bopus_${V}-${REV}_amd64.deb" >/dev/null
 rm -rf "$R/DEBIAN"

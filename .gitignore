@@ -14,3 +14,4 @@ S3bopus/
 x11/s3bopus
 x11/*.deb
 x11/*.rpm
+x11/s3bopus-static

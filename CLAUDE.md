@@ -1,6 +1,6 @@
 # S3bopus
 
-Explorateur de fichiers à deux panneaux (inspiré de Directory Opus). Version courante : 0.0.2. Réponses et commentaires en français.
+Explorateur de fichiers à deux panneaux (inspiré de Directory Opus). Version courante : 0.0.3. Réponses et commentaires en français.
 
 ## Structure
 - `src/` : version Windows, WinForms sur .NET Framework 4.8 (`net48`, LangVersion 10), appels Win32 (shell32, CopyFileEx).
@@ -30,5 +30,5 @@ Explorateur de fichiers à deux panneaux (inspiré de Directory Opus). Version c
 ## Site et publication
 - Site : https://s3btify.com/s3bopus/ (même Caddy que S3btify). Déploiement : `powershell -ExecutionPolicy Bypass -File .\deploy_site.ps1` (`-DryRun` pour préparer seulement). Il envoie à l'hôte Proxmox `root@192.168.6.94`, qui pousse dans le conteneur 212. Compteur propre à S3bopus sur le port 8091.
 - Avant de déployer : les fichiers de `site/static/downloads/` (ignorés par git) doivent correspondre aux tailles et SHA-256 de `site/static/index.html`.
-- Paquets en Releases GitHub (`gh release create vX.Y.Z --repo seb206/s3bopus …`) : `S3bopus-<v>-win.zip`, `S3bopus-light-<v>-win.zip`, `.deb`, `.rpm` (X11, révision `-2`), `.dmg` Mac.
+- Paquets en Releases GitHub (`gh release create vX.Y.Z --repo seb206/s3bopus …`) : `S3bopus-<v>-win.zip`, `S3bopus-light-<v>-win.zip`, `.deb`, `.rpm` (X11, révision `-3`) + binaire portable `s3bopus-<v>-linux-x86_64` (statique), `.dmg` Mac.
 - Dépôt public : ne rien y mettre de personnel (mots de passe, `.claude` du profil, captures privées).

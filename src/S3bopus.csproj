@@ -10,7 +10,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
-    <Version>0.0.2</Version>
+    <Version>0.0.3</Version>
     <Product>S3bopus</Product>
     <Description>Explorateur de fichiers double panneau</Description>
     <Copyright>S3bopus</Copyright>
