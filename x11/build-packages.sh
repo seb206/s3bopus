@@ -1,6 +1,6 @@
 #!/bin/bash
 # Construit s3bopus_<v>-<rev>_amd64.deb et s3bopus-<v>-<rev>.x86_64.rpm du X11 (WSL ou Linux : gcc, libx11-dev, libxft-dev, zlib1g-dev, dpkg-deb, rpmbuild).
-#   bash x11/build-packages.sh 0.0.2 2
+#   bash x11/build-packages.sh 0.1.0 1
 set -euo pipefail
 V="${1:?version}"; REV="${2:?révision}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -16,7 +16,8 @@ Type=Application
 Name=S3bopus
 Comment=Dual-pane file manager
 Comment[fr]=Explorateur de fichiers a deux panneaux
-Exec=s3bopus
+Exec=s3bopus %f
+MimeType=inode/directory;
 Icon=s3bopus
 Terminal=false
 Categories=Utility;FileManager;

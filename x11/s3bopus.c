@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,7 +26,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
-#define VERSION "0.0.2"
+#define VERSION "0.1.0"
 #define MAXTABS 8
 #define MAXJOBS 512
 
@@ -577,12 +578,35 @@ static void set_theme(void) {
     }
 }
 // Préférences (langue, thème) dans ~/.config/s3bopus.conf
+static char PREVFM[128];  // gestionnaire de dossiers d'avant S3bopus, pour le restaurer
 static void conf_path(char *b, size_t n) { const char *h = getenv("HOME"); snprintf(b, n, "%s/.config/s3bopus.conf", h ? h : "/tmp"); }
-static void conf_save(void) { char b[PATH_MAX]; conf_path(b, sizeof b); FILE *f = fopen(b, "w"); if (f) { fprintf(f, "lang=%s\ntheme=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark"); fclose(f); } }
+static void conf_save(void) { char b[PATH_MAX]; conf_path(b, sizeof b); FILE *f = fopen(b, "w"); if (f) { fprintf(f, "lang=%s\ntheme=%s\nfm=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark", PREVFM); fclose(f); } }
 static void conf_load(void) {
-    char b[PATH_MAX], l[64]; conf_path(b, sizeof b); FILE *f = fopen(b, "r"); if (!f) return;
-    while (fgets(l, sizeof l, f)) { if (!strncmp(l, "lang=en", 7)) EN = 1; else if (!strncmp(l, "lang=fr", 7)) EN = 0; else if (!strncmp(l, "theme=light", 11)) LIGHT = 1; else if (!strncmp(l, "theme=dark", 10)) LIGHT = 0; }
+    char b[PATH_MAX], l[160]; conf_path(b, sizeof b); FILE *f = fopen(b, "r"); if (!f) return;
+    while (fgets(l, sizeof l, f)) { if (!strncmp(l, "lang=en", 7)) EN = 1; else if (!strncmp(l, "lang=fr", 7)) EN = 0; else if (!strncmp(l, "theme=light", 11)) LIGHT = 1; else if (!strncmp(l, "theme=dark", 10)) LIGHT = 0; else if (!strncmp(l, "fm=", 3)) { snprintf(PREVFM, sizeof PREVFM, "%s", l + 3); PREVFM[strcspn(PREVFM, "\r\n")] = 0; } }
     fclose(f);
+}
+
+// Gestionnaire de dossiers par défaut (xdg-mime), réversible
+static int DEF;
+static int fm_query(char *out, size_t n) {
+    out[0] = 0; FILE *f = popen("xdg-mime query default inode/directory 2>/dev/null", "r"); if (!f) return 0;
+    if (fgets(out, n, f)) out[strcspn(out, "\r\n")] = 0;
+    pclose(f); return strstr(out, "s3bopus") != NULL;
+}
+static void toggle_default(void) {
+    char cur[128], c[256];
+    int on = fm_query(cur, sizeof cur);
+    if (!on) {
+        snprintf(PREVFM, sizeof PREVFM, "%s", cur);
+        if (system("xdg-mime default s3bopus.desktop inode/directory") != 0) { say(T("xdg-mime a échoué", "xdg-mime failed")); return; }
+    } else {
+        for (char *q = PREVFM; *q; q++) if (!isalnum((unsigned char)*q) && !strchr("._-", *q)) { PREVFM[0] = 0; break; }
+        if (!PREVFM[0] || strstr(PREVFM, "s3bopus")) { say(T("Ancien gestionnaire inconnu : choisissez-en un dans les paramètres du système", "Previous file manager unknown: pick one in your system settings")); return; }
+        snprintf(c, sizeof c, "xdg-mime default %s inode/directory", PREVFM); if (system(c) != 0) { say(T("xdg-mime a échoué", "xdg-mime failed")); return; }
+    }
+    DEF = fm_query(cur, sizeof cur); conf_save(); dirty = 1;
+    say(DEF ? T("S3bopus ouvre maintenant les dossiers", "S3bopus now opens folders") : T("Gestionnaire d'origine rétabli", "Original file manager restored"));
 }
 
 static void rect(int x, int y, int w, int h, int c) { if (w > 0 && h > 0) { XSetForeground(dpy, gc, PX[c]); XFillRectangle(dpy, pix, gc, x, y, w, h); } }
@@ -636,7 +660,8 @@ static void draw_pane(int p) {
     for (int r = 0; r < rows; r++) {
         int i = t->top + r; if (i >= pp->n) break;
         Ent *e = &pp->e[i]; int y = ly + r * rh;
-        if (i == t->cur) rect(x, y, w, rh, p == active ? C_CURROW : C_SELROW);
+        int nw = 16 + text_w(e->name); if (nw > w - 150) nw = w - 150;
+        if (i == t->cur) rect(x, y, nw, rh, p == active ? C_CURROW : C_SELROW);
         int col = e->sel ? C_MARK : e->dir ? C_DIR : C_TEXT;
         char sz[40] = "", dt[40] = "";
         if (e->size == -1) snprintf(sz, sizeof sz, "…"); else if (e->size >= 0) fmt_size(sz, sizeof sz, e->size);
@@ -700,13 +725,14 @@ static void draw(void) {
     }
     const char *keys[] = {"F2 ", "F5 ", "F6 ", "F7 ", "F8 ", "F10 "};
     const char *lab[] = {T("Renommer", "Rename"), T("Copier", "Copy"), T("Déplacer", "Move"), T("Dossier", "New folder"), T("Supprimer", "Delete"), T("Quitter", "Quit")};
-    int fy = H - rh - 2, fw = (W - 190) / 6;
+    int fy = H - rh - 2, fw = (W - 310) / 6;
     rect(0, fy, W, rh + 2, C_PANEL);
     for (int i = 0; i < 6; i++) {
         text(i * fw + 8, fy + 1, C_MARK, keys[i]);
         text(i * fw + 8 + text_w(keys[i]), fy + 1, C_TEXT, lab[i]);
     }
     // boutons langue et thème, à droite
+    { const char *dl = T("Gest. défaut", "Default FM"); rect(W - 300, fy + 2, 110, rh - 2, DEF ? C_CURROW : C_SELROW); text(W - 300 + (110 - text_w(dl)) / 2, fy + 1, C_TEXT, dl); }
     rect(W - 186, fy + 2, 40, rh - 2, !EN ? C_CURROW : C_SELROW); text(W - 186 + (40 - text_w("FR")) / 2, fy + 1, C_TEXT, "FR");
     rect(W - 142, fy + 2, 40, rh - 2, EN ? C_CURROW : C_SELROW); text(W - 142 + (40 - text_w("EN")) / 2, fy + 1, C_TEXT, "EN");
     const char *tl = LIGHT ? T("Clair", "Light") : T("Sombre", "Dark");
@@ -973,6 +999,7 @@ static void on_click(XButtonEvent *be) {
     if (be->y >= H - rh - 2) {
         if (be->x >= W - 186 && be->x < W - 146) EN = 0; else if (be->x >= W - 142 && be->x < W - 102) EN = 1;
         else if (be->x >= W - 94) { LIGHT = !LIGHT; set_theme(); }
+        else if (be->x >= W - 300 && be->x < W - 190) { toggle_default(); return; }
         else return;
         conf_save(); dirty = 1; return;
     }
@@ -984,16 +1011,21 @@ static void on_click(XButtonEvent *be) {
     }
     if (be->y < ly || be->y >= ly + lh) return;
     Tab *t = &P[p].tabs[P[p].atab]; int row = t->top + (be->y - ly) / rh;
-    if (row >= P[p].n) return;
+    double tn = now();
+    // Hors du nom (autre colonne, vide) : rien n'est sélectionné, le double-clic remonte d'un dossier
+    int nw = row < P[p].n ? 16 + text_w(P[p].e[row].name) : 0; if (nw > w - 150) nw = w - 150;
+    if (row >= P[p].n || be->x - x > nw) {
+        if (lastrow == -2 && p == lastp && tn - last < 0.4) { lastrow = -1; parent(p); } else { lastrow = -2; lastp = p; last = tn; }
+        return;
+    }
     t->cur = row;
     if (be->state & ControlMask) toggle_sel(p, 0);
-    double tn = now();
     if (row == lastrow && p == lastp && tn - last < 0.4) { enter(p); lastrow = -1; } else { lastrow = row; lastp = p; last = tn; }
 }
 
 int main(int argc, char **argv) {
     setlocale(LC_ALL, ""); signal(SIGCHLD, SIG_IGN); signal(SIGPIPE, SIG_IGN);
-    const char *lg = getenv("LANG"); EN = !(lg && !strncmp(lg, "fr", 2)); conf_load();
+    const char *lg = getenv("LANG"); EN = !(lg && !strncmp(lg, "fr", 2)); conf_load(); { char tmp[128]; DEF = fm_query(tmp, sizeof tmp); }
     if (argc > 1 && !strcmp(argv[1], "--version")) { printf("S3bopus %s (X11)\n", VERSION); return 0; }
     if (!(dpy = XOpenDisplay(NULL))) { fprintf(stderr, "S3bopus : pas d'affichage X11 (DISPLAY)\n"); return 1; }
     scr = DefaultScreen(dpy); vis = DefaultVisual(dpy, scr); cmap = DefaultColormap(dpy, scr);
