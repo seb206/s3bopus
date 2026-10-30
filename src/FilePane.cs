@@ -82,8 +82,31 @@ namespace S3bopus
                 ShellMenuRequested?.Invoke(pt, keyboard);
                 return;
             }
+            if (m.Msg == 0x0201 /* WM_LBUTTONDOWN */ || m.Msg == 0x0203 /* WM_LBUTTONDBLCLK */)
+            {
+                var p = new Point((short)(m.LParam.ToInt64() & 0xFFFF), (short)((m.LParam.ToInt64() >> 16) & 0xFFFF));
+                if (!OverName(p))
+                {
+                    // Hors du nom (autre colonne, espace vide) : rien n'est sélectionné, le double-clic remonte.
+                    if (m.Msg == 0x0203) EmptyDoubleClick?.Invoke();
+                    else { SelectedIndices.Clear(); Focus(); }
+                    return;
+                }
+            }
             base.WndProc(ref m);
         }
+
+        // Vrai si le point est sur l'icône ou le texte du nom (pas sur le reste de la ligne).
+        bool OverName(Point p)
+        {
+            var it = HitTest(p).Item;
+            if (it == null) return false;
+            var ic = it.GetBounds(ItemBoundsPortion.Icon);
+            var lb = it.GetBounds(ItemBoundsPortion.Label);
+            return p.X >= ic.Left && p.X <= lb.Left + TextRenderer.MeasureText(it.Text, Font).Width + 8;
+        }
+
+        public event Action EmptyDoubleClick;
 
         public void SetSortIcon(int column, bool ascending)
         {
@@ -211,7 +234,7 @@ namespace S3bopus
                 Dock = DockStyle.Fill,
                 View = View.Details,
                 VirtualMode = true,
-                FullRowSelect = true,
+                FullRowSelect = false,
                 HideSelection = false,
                 LabelEdit = true,
                 AllowColumnReorder = true,
@@ -230,6 +253,7 @@ namespace S3bopus
             _lv.SearchForVirtualItem += Lv_SearchForVirtualItem;
             _lv.ColumnClick += (s, e) => SortBy(e.Column);
             _lv.MouseDoubleClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenSelected(); };
+            _lv.EmptyDoubleClick += GoUp;
             _lv.MouseUp += Lv_MouseUp;
             _lv.KeyDown += Lv_KeyDown;
             _lv.SelectedIndexChanged += (s, e) => _statusDirty = true;

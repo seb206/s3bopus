@@ -1,6 +1,6 @@
 # S3bopus
 
-Explorateur de fichiers à deux panneaux (inspiré de Directory Opus). Version courante : 0.0.3. Réponses et commentaires en français.
+Explorateur de fichiers à deux panneaux (inspiré de Directory Opus). Version courante : 0.1.0. Réponses et commentaires en français.
 
 ## Structure
 - `src/` : version Windows, WinForms sur .NET Framework 4.8 (`net48`, LangVersion 10), appels Win32 (shell32, CopyFileEx).

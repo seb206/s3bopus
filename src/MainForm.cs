@@ -15,7 +15,7 @@ namespace S3bopus
         readonly QueuePanel _queuePanel;
         readonly TransferQueue _queue = new TransferQueue();
         readonly ToolStrip _commands, _fkeys;
-        readonly ToolStripMenuItem _miHidden, _miAutoSizes, _miFKeys, _miQueue;
+        readonly ToolStripMenuItem _miHidden, _miAutoSizes, _miFKeys, _miQueue, _miReplace;
         FilePane _active;
         double _ratio = 0.5;
 
@@ -80,6 +80,11 @@ namespace S3bopus
             _miHidden = new ToolStripMenuItem(Lang.T("Afficher les éléments masqués", "Show hidden items"), null, (s, e) => ToggleHidden()) { Checked = FilePane.ShowHidden, ShortcutKeyDisplayString = "Ctrl+H" };
             _miAutoSizes = new ToolStripMenuItem(Lang.T("Calculer automatiquement la taille des dossiers", "Compute folder sizes automatically"), null, (s, e) => ToggleAutoSizes()) { Checked = FilePane.AutoSizes };
             _miFKeys = new ToolStripMenuItem(Lang.T("Barre des touches de fonction", "Function key bar"), null, (s, e) => { _fkeys.Visible = !_fkeys.Visible; _miFKeys.Checked = _fkeys.Visible; }) { Checked = Settings.GetBool("FKeys", true) };
+            _miReplace = new ToolStripMenuItem(Lang.T("Remplacer l'Explorateur Windows (dossiers et lecteurs)", "Replace Windows Explorer (folders and drives)"), null, (s, e) =>
+            {
+                try { ExplorerReplace.Set(!_miReplace.Checked); _miReplace.Checked = ExplorerReplace.Enabled; }
+                catch (Exception ex) { MessageBox.Show(ex.Message, "S3bopus", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            }) { Checked = ExplorerReplace.Enabled };
             more.DropDownItems.AddRange(new ToolStripItem[]
             {
                 _miQueue, _miHidden, _miAutoSizes, _miFKeys, new ToolStripSeparator(),
@@ -87,6 +92,7 @@ namespace S3bopus
                 new ToolStripMenuItem(Lang.T("Inverser la sélection", "Invert selection"), null, (s, e) => _active.InvertSelection()),
                 new ToolStripMenuItem(Lang.T("Actualiser", "Refresh"), null, (s, e) => _active.Reload(true)) { ShortcutKeyDisplayString = "Ctrl+R" },
                 new ToolStripSeparator(),
+                _miReplace,
                 new ToolStripMenuItem(Lang.T("À propos de S3bopus", "About S3bopus"), null, (s, e) => About())
             });
             more.DropDown.Renderer = new ExplorerRenderer();

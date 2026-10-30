@@ -2,15 +2,14 @@
 #   powershell -ExecutionPolicy Bypass -File .\deploy_site.ps1          (-DryRun : préparer sans rien envoyer)
 #
 # 1. vérifie que les fichiers de site\static\downloads sont ceux annoncés par index.html (SHA-256) ;
-# 2. prépare un paquet dans %TEMP%, l'envoie par scp sur l'hôte Proxmox, qui le pousse dans le conteneur de S3btify (pct push)
+# 2. prépare un paquet dans %TEMP%, l'envoie par scp sur le serveur Caddy de S3btify (192.168.151.160)
 #    où site\deploy\ct_update.sh installe :
 #    site dans /usr/share/caddy/s3bopus, compteur (service s3bopus-counter, port 8091), « import » ajouté au Caddyfile
 #    (sauvegardé et validé avant le rechargement). Le site et le compteur de S3btify ne sont pas touchés.
-# Prérequis : OpenSSH (Windows 11). Clé SSH (par défaut ~\.ssh\id_ed25519-proxmox) autorisée sur l'hôte Proxmox.
+# Prérequis : OpenSSH (Windows 11). Clé SSH (par défaut ~\.ssh\id_ed25519-Sbtify) autorisée sur le serveur.
 param(
-    [string]$Server = "root@192.168.6.94",   # hôte Proxmox
-    [int]$Container = 212,                    # conteneur LXC de S3btify (Caddy)
-    [string]$Key = "$env:USERPROFILE\.ssh\id_ed25519-proxmox",   # clé SSH vers Proxmox
+    [string]$Server = "root@192.168.151.160",   # serveur Caddy de S3btify
+    [string]$Key = "$env:USERPROFILE\.ssh\id_ed25519-Sbtify",   # clé SSH vers le serveur
     [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
@@ -61,8 +60,8 @@ Write-Host "== Copie vers $Server"
 & ssh.exe @sshOpts $Server "rm -rf /tmp/s3bopus-deploy"
 & scp.exe @sshOpts -r $stage "${Server}:/tmp/"
 if ($LASTEXITCODE -ne 0) { throw "scp a échoué" }
-Write-Host "== Installation dans le conteneur $Container"
-& ssh.exe @sshOpts $Server "bash /tmp/s3bopus-deploy/host_update.sh $Container"
+Write-Host "== Installation sur $Server"
+& ssh.exe @sshOpts $Server "bash /tmp/s3bopus-deploy/ct_update.sh"
 if ($LASTEXITCODE -ne 0) { throw "L'installation sur le serveur a échoué (voir les messages ci-dessus)" }
 Remove-Item -Recurse -Force $stage
 Write-Host "== Terminé : https://s3btify.com/s3bopus/"
