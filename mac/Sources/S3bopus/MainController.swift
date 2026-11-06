@@ -31,11 +31,12 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
     private var timer: Timer?
     private var queueHeight: CGFloat = 200
 
-    var showHiddenItem: NSMenuItem?, autoSizesItem: NSMenuItem?, queueItem: NSMenuItem?, fkeysItem: NSMenuItem?
+    var rowSelectItem: NSMenuItem?, showHiddenItem: NSMenuItem?, autoSizesItem: NSMenuItem?, queueItem: NSMenuItem?, fkeysItem: NSMenuItem?
 
     override init() {
-        FilePane.showHidden = Settings.bool("ShowHidden", false)
-        FilePane.autoSizes = Settings.bool("AutoSizes", false)
+        FilePane.showHidden = Settings.bool("ShowHidden", true)
+        FilePane.autoSizes = Settings.bool("AutoSizes", true)
+        PaneTable.rowSelect = Settings.bool("RowSelect", true)
         queuePanel = QueuePanel(queue: queue)
         var leftRef: PaneTabs?, rightRef: PaneTabs?
         var hostRef: PaneHost?
@@ -326,6 +327,11 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
         autoSizesItem?.state = FilePane.autoSizes ? .on : .off
         if FilePane.autoSizes { leftTabs.current.computeSizes(force: false); rightTabs.current.computeSizes(force: false) }
     }
+    @objc func toggleRowSelect() {
+        PaneTable.rowSelect.toggle()
+        rowSelectItem?.state = PaneTable.rowSelect ? .on : .off
+        allPanes.forEach { $0.table.deselectAll(nil) }
+    }
     @objc func toggleFKeys() {
         fkeyBar.isHidden.toggle()
         window.contentView?.needsLayout = true
@@ -390,6 +396,7 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
         queue.allJobs.forEach { queue.cancel($0) }
         Settings.set("ShowHidden", FilePane.showHidden)
         Settings.set("AutoSizes", FilePane.autoSizes)
+        Settings.set("RowSelect", PaneTable.rowSelect)
         Settings.set("FKeys", !fkeyBar.isHidden)
         Settings.set("QueueVisible", !queuePanel.isHidden)
         Settings.set("QueueHeight", Int(queuePanel.isHidden ? queueHeight : queuePanel.frame.height))

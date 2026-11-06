@@ -90,6 +90,8 @@ enum MenuBuilder {
         c.showHiddenItem?.state = FilePane.showHidden ? .on : .off
         c.autoSizesItem = add(view, Lang.T("Calculer automatiquement la taille des dossiers", "Compute Folder Sizes Automatically"), #selector(MainController.toggleAutoSizes))
         c.autoSizesItem?.state = FilePane.autoSizes ? .on : .off
+        c.rowSelectItem = add(view, Lang.T("Sélection sur la ligne entière (sinon sur le nom du fichier)", "Select the Whole Row (otherwise the File Name only)"), #selector(MainController.toggleRowSelect))
+        c.rowSelectItem?.state = PaneTable.rowSelect ? .on : .off
         c.queueItem = add(view, Lang.T("File de transferts", "Transfer Queue"), #selector(MainController.toggleQueue), "j")
         c.fkeysItem = add(view, Lang.T("Barre des touches de fonction", "Function Key Bar"), #selector(MainController.toggleFKeys))
         c.fkeysItem?.state = Settings.bool("FKeys", true) ? .on : .off

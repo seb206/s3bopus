@@ -18,7 +18,65 @@ final class PaneTable: NSTableView {
     override func keyDown(with event: NSEvent) {
         if pane?.handleKey(event) != true { super.keyDown(with: event) }
     }
-    override func mouseDown(with event: NSEvent) { pane?.activate(); super.mouseDown(with: event) }
+    /// Vrai : un clic sélectionne la ligne entière ; faux : seulement l'icône et le nom.
+    static var rowSelect = true
+
+    override func mouseDown(with event: NSEvent) {
+        pane?.activate()
+        let p = convert(event.locationInWindow, from: nil)
+        if overName(p) { super.mouseDown(with: event); return }
+        // Hors du nom (autres colonnes, espace vide) : double-clic = dossier parent, glissement = boîte de sélection.
+        if event.clickCount == 2 { pane?.goUp(); return }
+        window?.makeFirstResponder(self)
+        band(from: p, event: event)
+    }
+
+    /// Vrai si le point est sur l'icône ou le texte du nom.
+    private func overName(_ p: NSPoint) -> Bool {
+        let r = row(at: p)
+        guard r >= 0, column(at: p) == 0, let cell = view(atColumn: 0, row: r, makeIfNecessary: false) as? NameCell, let tf = cell.textField else { return false }
+        let col = rect(ofColumn: 0)
+        let end = col.minX + 2 + 16 + 4 + tf.attributedStringValue.size().width + 8
+        return p.x <= min(end, col.maxX)
+    }
+
+    private func band(from start: NSPoint, event: NSEvent) {
+        let base = event.modifierFlags.contains(.command) ? selectedRowIndexes : IndexSet()
+        let box = NSView()
+        box.wantsLayer = true
+        box.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
+        box.layer?.borderColor = NSColor.controlAccentColor.cgColor
+        box.layer?.borderWidth = 1
+        var moved = false
+        while let e = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            let p = convert(e.locationInWindow, from: nil)
+            if e.type == .leftMouseUp {
+                box.removeFromSuperview()
+                if !moved {
+                    if base.isEmpty { deselectAll(nil) }
+                    let r = row(at: p)
+                    if PaneTable.rowSelect, r >= 0 { selectRowIndexes([r], byExtendingSelection: !base.isEmpty) }
+                }
+                return
+            }
+            if !moved && abs(p.x - start.x) < 4 && abs(p.y - start.y) < 4 { continue }
+            moved = true
+            if box.superview == nil { addSubview(box) }
+            let rect = NSRect(x: min(start.x, p.x), y: min(start.y, p.y), width: abs(p.x - start.x), height: abs(p.y - start.y)).intersection(bounds)
+            box.frame = rect
+            var sel = base
+            for r in rows(in: rect).location..<(rows(in: rect).location + rows(in: rect).length) where r >= 0 && r < numberOfRows {
+                if !PaneTable.rowSelect {
+                    guard let cell = view(atColumn: 0, row: r, makeIfNecessary: false) as? NameCell, let tf = cell.textField else { continue }
+                    let col = rect_(ofColumn: 0)
+                    if rect.maxX < col.minX || rect.minX > col.minX + 2 + 16 + 4 + tf.attributedStringValue.size().width + 8 { continue }
+                }
+                sel.insert(r)
+            }
+            if sel != selectedRowIndexes { selectRowIndexes(sel, byExtendingSelection: false) }
+        }
+    }
+    private func rect_(ofColumn c: Int) -> NSRect { rect(ofColumn: c) }
     override func becomeFirstResponder() -> Bool { pane?.activate(); return super.becomeFirstResponder() }
     override func otherMouseDown(with event: NSEvent) { pane?.otherMouse(event) }
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -77,8 +135,8 @@ final class TextCell: NSTableCellView {
 }
 
 final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate, NSSearchFieldDelegate, NSComboBoxDelegate, NSMenuDelegate {
-    static var showHidden = false
-    static var autoSizes = false
+    static var showHidden = true
+    static var autoSizes = true
     private static var cutToken: Int?
 
     weak var host: PaneHost?
@@ -99,7 +157,7 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
     private var reloadWork: DispatchWorkItem?
 
     private let activeBar = NSView()
-    private let table = PaneTable()
+    let table = PaneTable()
     private let addressBox = NSComboBox()
     private let filterField = NSSearchField()
     private let statusLabel = NSTextField(labelWithString: "")
