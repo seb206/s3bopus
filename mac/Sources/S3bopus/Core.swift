@@ -10,8 +10,8 @@ enum Lang {
 }
 
 enum AppInfo {
-    static let version = "0.0.2"
-    static let date = "2026-10-24"
+    static let version = "1.0.1"
+    static let date = "2026-11-06"
 }
 
 enum Fmt {
