@@ -53,3 +53,17 @@ xclip -selection clipboard -t image/png -i $D/p.png; sleep 0.5
 k ctrl+v; sleep 3
 cmp $D/p.png "$D/c1/Pasted image.png"
 stop; echo "OK collage texte et image"
+
+# 4. boîte de sélection partie hors du nom (colonne date / vide) : mode ligne puis mode nom
+mkdir -p $D/h/.config $D/s1 $D/s2 $D/s3 $D/s4; for f in a b c; do echo $f > $D/s1/$f.txt; done
+band() { xdotool mousemove 500 300 mousedown 1 mousemove 505 200 mousemove "$1" 50 mouseup 1; sleep 0.3; }
+export HOME=$D/h
+start $D/s1 $D/s2; band 520; k F5; sleep 2
+[ "$(ls $D/s2 | wc -l)" = 3 ] || { echo "ECHEC boîte en mode ligne"; exit 1; }
+stop
+printf 'rowsel=0\n' > $D/h/.config/s3bopus.conf
+start $D/s1 $D/s3; band 520; k F5; sleep 2
+[ "$(ls $D/s3 | wc -l)" = 0 ] || { echo "ECHEC mode nom : la boîte hors des noms sélectionne"; exit 1; }
+band 20; k F5; sleep 2
+[ "$(ls $D/s3 | wc -l)" = 3 ] || { echo "ECHEC mode nom : la boîte sur les noms ne sélectionne pas"; exit 1; }
+stop; echo "OK boîte de sélection (ligne et nom)"

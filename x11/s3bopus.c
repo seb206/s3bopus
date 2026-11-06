@@ -26,7 +26,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
-#define VERSION "0.1.0"
+#define VERSION "1.0.1"
 #define MAXTABS 8
 #define MAXJOBS 512
 
@@ -67,6 +67,7 @@ typedef struct {
 static void say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static Pane P[2];
 static int active, show_hidden;
+static int ROWSEL = 1;  // 1 : la sélection prend la ligne entière, 0 : seulement le nom du fichier
 static pthread_mutex_t pm = PTHREAD_MUTEX_INITIALIZER;
 static volatile int dirty = 1, refresh_req;
 
@@ -583,7 +584,7 @@ static void conf_path(char *b, size_t n) { const char *h = getenv("HOME"); snpri
 static void conf_save(void) { char b[PATH_MAX]; conf_path(b, sizeof b); FILE *f = fopen(b, "w"); if (f) { fprintf(f, "lang=%s\ntheme=%s\nfm=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark", PREVFM); fclose(f); } }
 static void conf_load(void) {
     char b[PATH_MAX], l[160]; conf_path(b, sizeof b); FILE *f = fopen(b, "r"); if (!f) return;
-    while (fgets(l, sizeof l, f)) { if (!strncmp(l, "lang=en", 7)) EN = 1; else if (!strncmp(l, "lang=fr", 7)) EN = 0; else if (!strncmp(l, "theme=light", 11)) LIGHT = 1; else if (!strncmp(l, "theme=dark", 10)) LIGHT = 0; else if (!strncmp(l, "fm=", 3)) { snprintf(PREVFM, sizeof PREVFM, "%s", l + 3); PREVFM[strcspn(PREVFM, "\r\n")] = 0; } }
+    while (fgets(l, sizeof l, f)) { if (!strncmp(l, "lang=en", 7)) EN = 1; else if (!strncmp(l, "lang=fr", 7)) EN = 0; else if (!strncmp(l, "theme=light", 11)) LIGHT = 1; else if (!strncmp(l, "theme=dark", 10)) LIGHT = 0; else if (!strncmp(l, "rowsel=", 7)) ROWSEL = l[7] != '0'; else if (!strncmp(l, "fm=", 3)) { snprintf(PREVFM, sizeof PREVFM, "%s", l + 3); PREVFM[strcspn(PREVFM, "\r\n")] = 0; } }
     fclose(f);
 }
 
@@ -638,6 +639,11 @@ static void say(const char *fmt, ...) { va_list a; va_start(a, fmt); vsnprintf(m
 static struct { int kind; char label[128]; char buf[512]; int len; } pr;  // saisie : 1 dossier, 2 renommer, 3 confirmer suppression
 static int tab_w(int p, int i) { char b[64]; const char *n = base_of(P[p].tabs[i].path); snprintf(b, sizeof b, "%s", n); int w = text_w(b) + 24; return w > 170 ? 170 : w; }
 
+// Boîte de sélection : part de n'importe où hors du nom (autres colonnes, vide) ; un simple clic sans glisser reste un clic
+static struct { int on, moved, p, x0, y0, rx, ry, rw, rh; unsigned char *base; int nbase; } bd;
+
+static int name_w(const Ent *e, int w) { int nw = 16 + text_w(e->name); return nw > w - 150 ? w - 150 : nw; }
+
 static void draw_pane(int p) {
     int x, w, ly, lh; geom(p, &x, &w, &ly, &lh);
     Pane *pp = &P[p]; Tab *t = &pp->tabs[pp->atab];
@@ -660,7 +666,7 @@ static void draw_pane(int p) {
     for (int r = 0; r < rows; r++) {
         int i = t->top + r; if (i >= pp->n) break;
         Ent *e = &pp->e[i]; int y = ly + r * rh;
-        int nw = 16 + text_w(e->name); if (nw > w - 150) nw = w - 150;
+        int nw = ROWSEL ? w - 1 : name_w(e, w);
         if (i == t->cur) rect(x, y, nw, rh, p == active ? C_CURROW : C_SELROW);
         int col = e->sel ? C_MARK : e->dir ? C_DIR : C_TEXT;
         char sz[40] = "", dt[40] = "";
@@ -711,6 +717,7 @@ static void draw(void) {
     for (int i = 0; i < pp->n; i++) if (pp->e[i].sel) { sel++; if (pp->e[i].size > 0) ss += pp->e[i].size; }
     int total = pp->n; char st[256], sz[40];
     pthread_mutex_unlock(&pm);
+    if (bd.moved) { XSetForeground(dpy, gc, PX[C_MARK]); XDrawRectangle(dpy, pix, gc, bd.rx, bd.ry, bd.rw, bd.rh); }
     draw_queue();
     int sy = H - (rh + 2) - rh;
     rect(0, sy, W, rh, C_LINE);
@@ -725,13 +732,14 @@ static void draw(void) {
     }
     const char *keys[] = {"F2 ", "F5 ", "F6 ", "F7 ", "F8 ", "F10 "};
     const char *lab[] = {T("Renommer", "Rename"), T("Copier", "Copy"), T("Déplacer", "Move"), T("Dossier", "New folder"), T("Supprimer", "Delete"), T("Quitter", "Quit")};
-    int fy = H - rh - 2, fw = (W - 310) / 6;
+    int fy = H - rh - 2, fw = (W - 424) / 6;
     rect(0, fy, W, rh + 2, C_PANEL);
     for (int i = 0; i < 6; i++) {
         text(i * fw + 8, fy + 1, C_MARK, keys[i]);
         text(i * fw + 8 + text_w(keys[i]), fy + 1, C_TEXT, lab[i]);
     }
     // boutons langue et thème, à droite
+    { const char *rl = ROWSEL ? T("Sél. ligne", "Row select") : T("Sél. nom", "Name select"); rect(W - 414, fy + 2, 110, rh - 2, C_SELROW); text(W - 414 + (110 - text_w(rl)) / 2, fy + 1, C_TEXT, rl); }
     { const char *dl = T("Gest. défaut", "Default FM"); rect(W - 300, fy + 2, 110, rh - 2, DEF ? C_CURROW : C_SELROW); text(W - 300 + (110 - text_w(dl)) / 2, fy + 1, C_TEXT, dl); }
     rect(W - 186, fy + 2, 40, rh - 2, !EN ? C_CURROW : C_SELROW); text(W - 186 + (40 - text_w("FR")) / 2, fy + 1, C_TEXT, "FR");
     rect(W - 142, fy + 2, 40, rh - 2, EN ? C_CURROW : C_SELROW); text(W - 142 + (40 - text_w("EN")) / 2, fy + 1, C_TEXT, "EN");
@@ -987,9 +995,39 @@ static void on_key(XKeyEvent *ke) {
     }
 }
 
+static void band_update(int mx, int my) {
+    int p = bd.p, x, w, ly, lh; geom(p, &x, &w, &ly, &lh);
+    mx = mx < x ? x : mx > x + w - 2 ? x + w - 2 : mx;
+    my = my < ly ? ly : my > ly + lh - 1 ? ly + lh - 1 : my;
+    int bx0 = bd.x0 < mx ? bd.x0 : mx, bx1 = bd.x0 < mx ? mx : bd.x0, by0 = bd.y0 < my ? bd.y0 : my, by1 = bd.y0 < my ? my : bd.y0;
+    bd.rx = bx0; bd.ry = by0; bd.rw = bx1 - bx0; bd.rh = by1 - by0;
+    Pane *pp = &P[p]; Tab *t = &pp->tabs[pp->atab];
+    int r0 = t->top + (by0 - ly) / rh, r1 = t->top + (by1 - ly) / rh;
+    pthread_mutex_lock(&pm);
+    for (int i = 0; i < pp->n; i++) {
+        Ent *e = &pp->e[i];
+        e->sel = bd.base && i < bd.nbase ? bd.base[i] : 0;
+        if (i < r0 || i > r1 || !strcmp(e->name, "..")) continue;
+        // mode nom : seule la zone du nom compte ; mode ligne : toute la ligne
+        if (!ROWSEL && (bx1 < x || bx0 > x + name_w(e, w))) continue;
+        e->sel = 1;
+    }
+    pthread_mutex_unlock(&pm);
+    dirty = 1;
+}
+
+static void click_row(int p, int row, unsigned state, int onname);
+static void band_end(XButtonEvent *be) {
+    if (!bd.on) return;
+    bd.on = 0; free(bd.base); bd.base = NULL; dirty = 1;
+    if (bd.moved) { bd.moved = 0; return; }
+    int x, w, ly, lh; geom(bd.p, &x, &w, &ly, &lh);
+    Tab *t = &P[bd.p].tabs[P[bd.p].atab]; int row = t->top + (be->y - ly) / rh;
+    click_row(bd.p, row, be->state, 0);
+}
+
 static void on_click(XButtonEvent *be) {
     int p = be->x >= W / 2, x, w, ly, lh; geom(p, &x, &w, &ly, &lh);
-    static double last; static int lastrow = -1, lastp = -1;
     if (be->button == Button4 || be->button == Button5) {
         Tab *t = &P[p].tabs[P[p].atab]; t->top += be->button == Button4 ? -3 : 3;
         int mx = P[p].n - vis_rows(p); if (t->top > mx) t->top = mx; if (t->top < 0) t->top = 0;
@@ -1000,6 +1038,7 @@ static void on_click(XButtonEvent *be) {
         if (be->x >= W - 186 && be->x < W - 146) EN = 0; else if (be->x >= W - 142 && be->x < W - 102) EN = 1;
         else if (be->x >= W - 94) { LIGHT = !LIGHT; set_theme(); }
         else if (be->x >= W - 300 && be->x < W - 190) { toggle_default(); return; }
+        else if (be->x >= W - 414 && be->x < W - 304) ROWSEL = !ROWSEL;
         else return;
         conf_save(); dirty = 1; return;
     }
@@ -1011,15 +1050,25 @@ static void on_click(XButtonEvent *be) {
     }
     if (be->y < ly || be->y >= ly + lh) return;
     Tab *t = &P[p].tabs[P[p].atab]; int row = t->top + (be->y - ly) / rh;
-    double tn = now();
-    // Hors du nom (autre colonne, vide) : rien n'est sélectionné, le double-clic remonte d'un dossier
-    int nw = row < P[p].n ? 16 + text_w(P[p].e[row].name) : 0; if (nw > w - 150) nw = w - 150;
-    if (row >= P[p].n || be->x - x > nw) {
+    // Hors du nom (autre colonne, vide) : une boîte de sélection peut démarrer ; sans glissement, band_end() traite le clic
+    if (row >= P[p].n || be->x - x > name_w(&P[p].e[row], w)) {
+        bd.on = 1; bd.moved = 0; bd.p = p; bd.x0 = be->x; bd.y0 = be->y; free(bd.base); bd.base = NULL; bd.nbase = 0;
+        if (be->state & ControlMask) { pthread_mutex_lock(&pm); bd.nbase = P[p].n; bd.base = malloc(bd.nbase ? bd.nbase : 1); for (int i = 0; i < bd.nbase; i++) bd.base[i] = P[p].e[i].sel; pthread_mutex_unlock(&pm); }
+        return;
+    }
+    click_row(p, row, be->state, 1);
+}
+
+// Clic sur une ligne (sur le nom, ou ailleurs sur la ligne en mode ligne) ; ailleurs : le double-clic remonte d'un dossier
+static void click_row(int p, int row, unsigned state, int onname) {
+    static double last; static int lastrow = -1, lastp = -1;
+    Tab *t = &P[p].tabs[P[p].atab]; double tn = now();
+    if (row >= P[p].n || (!onname && !ROWSEL)) {
         if (lastrow == -2 && p == lastp && tn - last < 0.4) { lastrow = -1; parent(p); } else { lastrow = -2; lastp = p; last = tn; }
         return;
     }
     t->cur = row;
-    if (be->state & ControlMask) toggle_sel(p, 0);
+    if (state & ControlMask) toggle_sel(p, 0);
     if (row == lastrow && p == lastp && tn - last < 0.4) { enter(p); lastrow = -1; } else { lastrow = row; lastp = p; last = tn; }
 }
 
@@ -1037,7 +1086,7 @@ int main(int argc, char **argv) {
     win = XCreateSimpleWindow(dpy, RootWindow(dpy, scr), 0, 0, W, H, 0, 0, PX[C_BG]);
     XStoreName(dpy, win, "S3bopus " VERSION);
     XClassHint ch = {"s3bopus", "S3bopus"}; XSetClassHint(dpy, win, &ch);
-    XSelectInput(dpy, win, ExposureMask | KeyPressMask | ButtonPressMask | StructureNotifyMask | PropertyChangeMask);
+    XSelectInput(dpy, win, ExposureMask | KeyPressMask | ButtonPressMask | ButtonReleaseMask | ButtonMotionMask | StructureNotifyMask | PropertyChangeMask);
     Atom del = XInternAtom(dpy, "WM_DELETE_WINDOW", False); XSetWMProtocols(dpy, win, &del, 1);
     gc = XCreateGC(dpy, win, 0, NULL);
     A_CLIP = XInternAtom(dpy, "CLIPBOARD", False); A_TARGETS = XInternAtom(dpy, "TARGETS", False); A_PROP = XInternAtom(dpy, "S3BOPUS_PASTE", False);
@@ -1068,6 +1117,8 @@ int main(int argc, char **argv) {
             case ConfigureNotify: if (ev.xconfigure.width != W || ev.xconfigure.height != H) { W = ev.xconfigure.width; H = ev.xconfigure.height; make_back(); dirty = 1; } break;
             case KeyPress: on_key(&ev.xkey); break;
             case ButtonPress: on_click(&ev.xbutton); break;
+            case MotionNotify: if (bd.on) { if (!bd.moved && abs(ev.xmotion.x - bd.x0) < 4 && abs(ev.xmotion.y - bd.y0) < 4) break; bd.moved = 1; band_update(ev.xmotion.x, ev.xmotion.y); } break;
+            case ButtonRelease: if (ev.xbutton.button == Button1) band_end(&ev.xbutton); break;
             case ClientMessage: if ((Atom)ev.xclient.data.l[0] == del) return 0; break;
             }
         }
