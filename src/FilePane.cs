@@ -36,6 +36,9 @@ namespace S3bopus
     {
         public event Action<Point, bool> ShellMenuRequested;
 
+        /// <summary>Vrai : la sélection (clic, boîte) prend la ligne entière ; faux : seulement l'icône et le nom.</summary>
+        public static bool RowSelect = true;
+
         public ExplorerListView()
         {
             DoubleBuffered = true;
@@ -82,18 +85,87 @@ namespace S3bopus
                 ShellMenuRequested?.Invoke(pt, keyboard);
                 return;
             }
+            var mp = new Point((short)(m.LParam.ToInt64() & 0xFFFF), (short)((m.LParam.ToInt64() >> 16) & 0xFFFF));
+            if (_banding)
+            {
+                if (m.Msg == 0x0200 /* WM_MOUSEMOVE */) { MoveBand(mp); return; }
+                if (m.Msg == 0x0202 /* WM_LBUTTONUP */ || m.Msg == 0x0215 /* WM_CAPTURECHANGED */) { EndBand(mp, m.Msg == 0x0202); return; }
+            }
             if (m.Msg == 0x0201 /* WM_LBUTTONDOWN */ || m.Msg == 0x0203 /* WM_LBUTTONDBLCLK */)
             {
-                var p = new Point((short)(m.LParam.ToInt64() & 0xFFFF), (short)((m.LParam.ToInt64() >> 16) & 0xFFFF));
-                if (!OverName(p))
+                if (!OverName(mp))
                 {
-                    // Hors du nom (autre colonne, espace vide) : rien n'est sélectionné, le double-clic remonte.
-                    if (m.Msg == 0x0203) EmptyDoubleClick?.Invoke();
-                    else { SelectedIndices.Clear(); Focus(); }
+                    // Hors du nom (autres colonnes, espace vide) : le double-clic remonte, un glissement trace la boîte de sélection.
+                    if (m.Msg == 0x0203) { EmptyDoubleClick?.Invoke(); return; }
+                    Focus();
+                    _banding = true; _bandMoved = false; _bandStart = mp; _bandLast = Rectangle.Empty; _bandBase = null;
+                    if ((ModifierKeys & Keys.Control) != 0) _bandBase = SelectedIndices.Cast<int>().ToList();
+                    Capture = true;
                     return;
                 }
             }
             base.WndProc(ref m);
+            if (m.Msg == 0x000F /* WM_PAINT */ && _banding && _bandLast.Width > 0 && _bandLast.Height > 0)
+                using (var g = CreateGraphics())
+                using (var fill = new SolidBrush(Color.FromArgb(50, Ui.Accent)))
+                using (var pen = new Pen(Ui.Accent))
+                {
+                    g.FillRectangle(fill, _bandLast);
+                    g.DrawRectangle(pen, _bandLast.X, _bandLast.Y, _bandLast.Width - 1, _bandLast.Height - 1);
+                }
+        }
+
+        // ---- Boîte de sélection maison : elle part de n'importe où hors du nom, y compris des autres colonnes.
+        bool _banding, _bandMoved;
+        Point _bandStart;
+        Rectangle _bandLast; // en coordonnées écran, pour effacer le cadre inversé
+        List<int> _bandBase, _bandSel = new List<int>();
+
+        void DrawBand(Rectangle client)
+        {
+            _bandLast = client; // dessiné après le rendu de la liste (voir WndProc, WM_PAINT)
+            Invalidate();
+        }
+
+        void MoveBand(Point p)
+        {
+            if (!_bandMoved && Math.Abs(p.X - _bandStart.X) < 4 && Math.Abs(p.Y - _bandStart.Y) < 4) return;
+            _bandMoved = true;
+            var r = Rectangle.Intersect(Rectangle.FromLTRB(Math.Min(_bandStart.X, p.X), Math.Min(_bandStart.Y, p.Y), Math.Max(_bandStart.X, p.X), Math.Max(_bandStart.Y, p.Y)), ClientRectangle);
+            DrawBand(r);
+            var sel = new List<int>(_bandBase ?? new List<int>());
+            // shortcut: pas de défilement automatique pendant le tracé, à ajouter si besoin
+            int top = (int)Native.SendMessage(Handle, 0x1027 /* LVM_GETTOPINDEX */, IntPtr.Zero, IntPtr.Zero);
+            for (int i = top; i < VirtualListSize; i++)
+            {
+                var row = GetItemRect(i);
+                if (row.Top > r.Bottom) break;
+                if (row.Bottom < r.Top) continue;
+                if (!RowSelect) // mode fichier : seule la zone icône + nom compte
+                {
+                    var ic = GetItemRect(i, ItemBoundsPortion.Icon);
+                    var lb = GetItemRect(i, ItemBoundsPortion.Label);
+                    if (r.Right < ic.Left || r.Left > lb.Left + TextRenderer.MeasureText(Items[i].Text, Font).Width + 8) continue;
+                }
+                if (!sel.Contains(i)) sel.Add(i);
+            }
+            if (sel.SequenceEqual(_bandSel)) return;
+            _bandSel = sel;
+            SelectedIndices.Clear();
+            foreach (int i in sel) SelectedIndices.Add(i);
+        }
+
+        void EndBand(Point p, bool released)
+        {
+            DrawBand(Rectangle.Empty);
+            _banding = false;
+            if (Capture) Capture = false;
+            if (_bandMoved || !released) { _bandSel = new List<int>(); return; }
+            // Simple clic hors du nom : mode ligne = sélectionne la ligne, mode fichier = désélectionne
+            if (_bandBase == null) SelectedIndices.Clear();
+            var it = RowSelect ? HitTest(p).Item : null;
+            if (it != null) SelectedIndices.Add(it.Index);
+            _bandSel = new List<int>();
         }
 
         // Vrai si le point est sur l'icône ou le texte du nom (pas sur le reste de la ligne).
@@ -234,7 +306,7 @@ namespace S3bopus
                 Dock = DockStyle.Fill,
                 View = View.Details,
                 VirtualMode = true,
-                FullRowSelect = false,
+                FullRowSelect = ExplorerListView.RowSelect,
                 HideSelection = false,
                 LabelEdit = true,
                 AllowColumnReorder = true,

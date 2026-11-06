@@ -15,7 +15,7 @@ namespace S3bopus
         readonly QueuePanel _queuePanel;
         readonly TransferQueue _queue = new TransferQueue();
         readonly ToolStrip _commands, _fkeys;
-        readonly ToolStripMenuItem _miHidden, _miAutoSizes, _miFKeys, _miQueue, _miReplace;
+        readonly ToolStripMenuItem _miHidden, _miAutoSizes, _miFKeys, _miQueue, _miReplace, _miRowSelect;
         FilePane _active;
         double _ratio = 0.5;
 
@@ -32,6 +32,7 @@ namespace S3bopus
 
             FilePane.ShowHidden = Settings.GetBool("ShowHidden", true);
             FilePane.AutoSizes = Settings.GetBool("AutoSizes", true);
+            ExplorerListView.RowSelect = Settings.GetBool("RowSelect", true);
 
             // ---- Barre de commandes (style Explorateur Windows 11)
             _commands = new ToolStrip
@@ -79,6 +80,12 @@ namespace S3bopus
             _miQueue = new ToolStripMenuItem(Lang.T("File de transferts", "Transfer queue"), null, (s, e) => ShowQueue(_outer.Panel2Collapsed)) { ShortcutKeyDisplayString = "Ctrl+T" };
             _miHidden = new ToolStripMenuItem(Lang.T("Afficher les éléments masqués", "Show hidden items"), null, (s, e) => ToggleHidden()) { Checked = FilePane.ShowHidden, ShortcutKeyDisplayString = "Ctrl+H" };
             _miAutoSizes = new ToolStripMenuItem(Lang.T("Calculer automatiquement la taille des dossiers", "Compute folder sizes automatically"), null, (s, e) => ToggleAutoSizes()) { Checked = FilePane.AutoSizes };
+            _miRowSelect = new ToolStripMenuItem(Lang.T("Sélection sur la ligne entière (sinon sur le nom du fichier)", "Select the whole row (otherwise the file name only)"), null, (s, e) =>
+            {
+                ExplorerListView.RowSelect = !ExplorerListView.RowSelect;
+                _miRowSelect.Checked = ExplorerListView.RowSelect;
+                foreach (var p in AllPanes) ((ExplorerListView)p.List).FullRowSelect = ExplorerListView.RowSelect;
+            }) { Checked = ExplorerListView.RowSelect };
             _miFKeys = new ToolStripMenuItem(Lang.T("Barre des touches de fonction", "Function key bar"), null, (s, e) => { _fkeys.Visible = !_fkeys.Visible; _miFKeys.Checked = _fkeys.Visible; }) { Checked = Settings.GetBool("FKeys", true) };
             _miReplace = new ToolStripMenuItem(Lang.T("Remplacer l'Explorateur Windows (dossiers et lecteurs)", "Replace Windows Explorer (folders and drives)"), null, (s, e) =>
             {
@@ -87,7 +94,7 @@ namespace S3bopus
             }) { Checked = ExplorerReplace.Enabled };
             more.DropDownItems.AddRange(new ToolStripItem[]
             {
-                _miQueue, _miHidden, _miAutoSizes, _miFKeys, new ToolStripSeparator(),
+                _miQueue, _miHidden, _miAutoSizes, _miRowSelect, _miFKeys, new ToolStripSeparator(),
                 new ToolStripMenuItem(Lang.T("Sélectionner tout", "Select all"), null, (s, e) => _active.SelectAll()) { ShortcutKeyDisplayString = "Ctrl+A" },
                 new ToolStripMenuItem(Lang.T("Inverser la sélection", "Invert selection"), null, (s, e) => _active.InvertSelection()),
                 new ToolStripMenuItem(Lang.T("Actualiser", "Refresh"), null, (s, e) => _active.Reload(true)) { ShortcutKeyDisplayString = "Ctrl+R" },
@@ -356,7 +363,7 @@ namespace S3bopus
 
         void About()
         {
-            string text ="S3bopus " + Application.ProductVersion + " — 2026-10-23\n\n" + (Lang.En ?
+            string text ="S3bopus " + Application.ProductVersion + " — 2026-11-06\n\n" + (Lang.En ?
                 "Lightweight dual-pane file manager.\n\n" +
                 "Shortcuts:\n" +
                 "  Tab  switch pane\n" +
@@ -489,6 +496,7 @@ namespace S3bopus
             Settings.Set("QueueHeight", _outer.Panel2Collapsed ? _queueHeight : _outer.Panel2.Height);
             Settings.Set("ShowHidden", FilePane.ShowHidden);
             Settings.Set("AutoSizes", FilePane.AutoSizes);
+            Settings.Set("RowSelect", ExplorerListView.RowSelect);
             Settings.Set("FKeys", _fkeys.Visible);
             Settings.Save();
             base.OnFormClosing(e);
