@@ -16,6 +16,13 @@ namespace S3bopus
         readonly TransferQueue _queue = new TransferQueue();
         readonly ToolStrip _commands, _fkeys;
         readonly ToolStripMenuItem _miHidden, _miAutoSizes, _miFKeys, _miQueue, _miReplace, _miRowSelect;
+#if !LIGHT
+        readonly ToolStripButton _tbPrev, _tbPlay, _tbNext;
+        readonly ToolStripSeparator _tbSep;
+        readonly ToolStripMenuItem _miLink;
+        readonly MarqueeBox _marqBox = new MarqueeBox();
+        ToolStripControlHost _marqHost;
+#endif
         FilePane _active;
         double _ratio = 0.5;
 
@@ -76,6 +83,24 @@ namespace S3bopus
                 Cmd(null, '\uEC50', ink, Lang.T("Ouvrir ce dossier dans l'Explorateur Windows", "Open this folder in Windows Explorer"), OpenInExplorer, false),
             });
 
+#if !LIGHT
+            // ---- Lien S3btify (0.15.31+) : précédent / lecture-pause / suivant, visibles seulement si S3btify répond
+            _tbSep = new ToolStripSeparator { Visible = false };
+            _tbPrev = Cmd(null, '', ink, Lang.T("S3btify : morceau précédent", "S3btify: previous track"), () => S3btifyLink.Send("prev"), false);
+            _tbPlay = Cmd(null, '', ink, Lang.T("S3btify : lecture / pause", "S3btify: play / pause"), () => S3btifyLink.Send("playpause"), false);
+            _tbNext = Cmd(null, '', ink, Lang.T("S3btify : morceau suivant", "S3btify: next track"), () => S3btifyLink.Send("next"), false);
+            _tbPrev.Visible = _tbPlay.Visible = _tbNext.Visible = false;
+            _commands.Items.AddRange(new ToolStripItem[] { _tbSep, _tbPrev, _tbPlay, _tbNext });
+            _marqHost = new ToolStripControlHost(_marqBox) { AutoSize = false, Size = _marqBox.Size, Margin = new Padding(Ui.S(8), 1, 0, 2) };
+            _commands.Items.Add(_marqHost);
+            _commands.Resize += (s, e) => FitMarquee();
+            _miLink = new ToolStripMenuItem(Lang.T("Afficher et contrôler S3btify (en ligne, morceau, suivants)", "Show and control S3btify (online, track, next)"), null, (s, e) =>
+            {
+                _miLink.Checked = !_miLink.Checked;
+                Settings.Set("S3btify", _miLink.Checked);
+                UpdateLink();
+            }) { Checked = Settings.GetBool("S3btify", true) };
+#endif
             var more = new ToolStripDropDownButton(null, Ui.Glyph('\uE712', ink)) { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Options", ShowDropDownArrow = false };
             _miQueue = new ToolStripMenuItem(Lang.T("File de transferts", "Transfer queue"), null, (s, e) => ShowQueue(_outer.Panel2Collapsed)) { ShortcutKeyDisplayString = "Ctrl+T" };
             _miHidden = new ToolStripMenuItem(Lang.T("Afficher les éléments masqués", "Show hidden items"), null, (s, e) => ToggleHidden()) { Checked = FilePane.ShowHidden, ShortcutKeyDisplayString = "Ctrl+H" };
@@ -102,6 +127,9 @@ namespace S3bopus
                 _miReplace,
                 new ToolStripMenuItem(Lang.T("À propos de S3bopus", "About S3bopus"), null, (s, e) => About())
             });
+#if !LIGHT
+            more.DropDownItems.Insert(4, _miLink);
+#endif
             more.DropDown.Renderer = new ExplorerRenderer();
             _commands.Items.Add(more);
             // Langue et thème : enregistrés puis appliqués en relançant l'application
@@ -183,6 +211,11 @@ namespace S3bopus
                 BeginInvoke(new Action(() => OnJobChanged(job)));
             };
 
+#if !LIGHT
+            S3btifyLink.Changed += () => { if (!IsDisposed && IsHandleCreated) try { BeginInvoke(new Action(UpdateLink)); } catch { } };
+            UpdateLink();
+            S3btifyLink.Start();
+#endif
             var titleTimer = new Timer { Interval = 1000, Enabled = true };
             titleTimer.Tick += (s, e) =>
             {
@@ -208,6 +241,41 @@ namespace S3bopus
             };
             _split.Resize += (s, e) => ApplyRatio();
         }
+
+#if !LIGHT
+        /// <summary>Le bandeau prend la place qui reste dans la barre ; trop étroit, il disparaît au lieu de pousser les options dans le menu de débordement.</summary>
+        void FitMarquee()
+        {
+            int used = 0;
+            foreach (ToolStripItem it in _commands.Items)
+                if (it != _marqHost && it.Available) used += it.GetPreferredSize(Size.Empty).Width + it.Margin.Horizontal;
+            int w = Math.Min(Ui.S(520), _commands.Width - _commands.Padding.Horizontal - used - _marqHost.Margin.Horizontal - Ui.S(30));
+            bool show = _miLink.Checked && w >= Ui.S(70);
+            _marqHost.Visible = show;
+            if (show) _marqHost.Size = new Size(w, _marqBox.Height);
+        }
+
+        bool LinkOn => S3btifyLink.Available && _miLink.Checked;
+
+        /// <summary>Bandeau en ligne / hors ligne + morceau en cours et suivants ; boutons de contrôle seulement si S3btify répond.</summary>
+        void UpdateLink()
+        {
+            _tbSep.Visible = _tbPrev.Visible = _tbPlay.Visible = _tbNext.Visible = LinkOn;
+            _tbPlay.Image = Ui.Glyph(S3btifyLink.Playing ? '' : '', Ui.Ink);
+            string text;
+            if (!S3btifyLink.Available) text = Lang.T("S3btify hors ligne", "S3btify offline");
+            else
+            {
+                string now = S3btifyLink.Title.Length > 0
+                    ? "♪ " + (S3btifyLink.Artist.Length > 0 ? S3btifyLink.Artist + " – " : "") + S3btifyLink.Title + (S3btifyLink.Playing ? "" : Lang.T(" (pause)", " (paused)"))
+                    : Lang.T("rien en lecture", "nothing playing");
+                text = "S3btify " + S3btifyLink.AppVersion + "  ·  " + now + (S3btifyLink.NextText.Length > 0 ? "   ·   " + Lang.T("Suivants : ", "Next: ") + S3btifyLink.NextText : "");
+            }
+            FitMarquee();
+            _marqBox.SetState(S3btifyLink.Available, text);
+            _tbPlay.ToolTipText = text.Replace("   ·   ", "\n");
+        }
+#endif
 
         void Relaunch(string key, bool value)
         {
