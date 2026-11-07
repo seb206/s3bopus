@@ -42,6 +42,68 @@ namespace S3bopus
         public ExplorerListView()
         {
             DoubleBuffered = true;
+            ApplyRowSelect();
+        }
+
+        /// <summary>Mode ligne : dessin natif. Mode fichier : dessin maison, la surbrillance s'arrête au nom (le natif remplit toute la colonne).</summary>
+        public void ApplyRowSelect()
+        {
+            FullRowSelect = RowSelect;
+            OwnerDraw = !RowSelect;
+            Invalidate();
+        }
+
+        protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e)
+        {
+            // En-tête dessiné à la main : le dessin par défaut ignore le thème sombre
+            var g = e.Graphics; var r = e.Bounds;
+            using (var br = new SolidBrush(Ui.Back)) g.FillRectangle(br, r);
+            using (var pen = new Pen(Ui.Line)) { g.DrawLine(pen, r.Left, r.Bottom - 1, r.Right, r.Bottom - 1); g.DrawLine(pen, r.Right - 1, r.Top + 4, r.Right - 1, r.Bottom - 5); }
+            var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | (e.Header.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left);
+            var tr = Rectangle.FromLTRB(r.Left + 6, r.Top, r.Right - 6 - (e.ColumnIndex == _sortCol ? Ui.S(14) : 0), r.Bottom);
+            TextRenderer.DrawText(g, e.Header.Text, Font, tr, Ui.TextGray, flags);
+            if (e.ColumnIndex == _sortCol)
+            {
+                int cx = r.Right - Ui.S(12), cy = r.Top + r.Height / 2, d = Ui.S(3);
+                var pts = _sortAsc ? new[] { new Point(cx - d, cy + d / 2), new Point(cx + d, cy + d / 2), new Point(cx, cy - d) } : new[] { new Point(cx - d, cy - d / 2), new Point(cx + d, cy - d / 2), new Point(cx, cy + d) };
+                using (var br = new SolidBrush(Ui.TextGray)) g.FillPolygon(br, pts);
+            }
+        }
+
+        int _sortCol = -1; bool _sortAsc;
+
+        protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
+        {
+            var g = e.Graphics;
+            var col = Columns[e.ColumnIndex];
+            var cell = e.Bounds;
+            if (e.ColumnIndex == 0 && cell.Width > col.Width) cell.Width = col.Width; // la colonne 0 peut annoncer toute la ligne
+            using (var back = new SolidBrush(BackColor)) g.FillRectangle(back, cell);
+            Color fore = e.Item.ForeColor;
+            var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+            if (e.ColumnIndex == 0)
+            {
+                var ic = e.Item.GetBounds(ItemBoundsPortion.Icon);
+                var lb = e.Item.GetBounds(ItemBoundsPortion.Label);
+                int textW = TextRenderer.MeasureText(e.Item.Text, Font).Width;
+                int right = Math.Min(cell.Right - 1, lb.Left + textW + 2);
+                var hl = Rectangle.FromLTRB(Math.Max(cell.Left, ic.Left - 2), cell.Top, right, cell.Bottom - 1);
+                bool sel = SelectedIndices.Contains(e.ItemIndex) || e.ItemIndex == _dropHilite; // ItemState ment en mode virtuel
+                if (sel && hl.Width > 0)
+                {
+                    Color fill = Focused ? (Ui.Dark ? Color.FromArgb(4, 57, 94) : Color.FromArgb(204, 232, 255)) : (Ui.Dark ? Color.FromArgb(55, 55, 55) : Color.FromArgb(217, 217, 217));
+                    using (var br = new SolidBrush(fill)) g.FillRectangle(br, hl);
+                }
+                var bmp = SysIcons.Bitmap(e.Item.ImageIndex);
+                if (bmp != null) g.DrawImage(bmp, ic.Left, ic.Top + (ic.Height - bmp.Height) / 2, bmp.Width, bmp.Height);
+                var tr = Rectangle.FromLTRB(lb.Left, cell.Top, cell.Right, cell.Bottom);
+                TextRenderer.DrawText(g, e.Item.Text, Font, tr, fore, flags | TextFormatFlags.Left);
+            }
+            else
+            {
+                var tr = Rectangle.FromLTRB(cell.Left + 6, cell.Top, cell.Right - 6, cell.Bottom);
+                TextRenderer.DrawText(g, e.SubItem.Text, Font, tr, fore, flags | (col.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left));
+            }
         }
 
         protected override CreateParams CreateParams
@@ -85,6 +147,23 @@ namespace S3bopus
                 ShellMenuRequested?.Invoke(pt, keyboard);
                 return;
             }
+            // Flèches seules : le curseur se déplace sans sélectionner (Maj étend la sélection, Ctrl reste natif)
+            if (m.Msg == 0x0100 /* WM_KEYDOWN */ && VirtualListSize > 0 && (ModifierKeys & (Keys.Shift | Keys.Control | Keys.Alt)) == 0)
+            {
+                int vk = (int)m.WParam, cur = FocusedItem?.Index ?? 0, idx = 0; bool nav = true;
+                int page = Math.Max(1, (int)Native.SendMessage(Handle, 0x1028 /* LVM_GETCOUNTPERPAGE */, IntPtr.Zero, IntPtr.Zero) - 1);
+                if (vk == 0x26) idx = cur - 1; else if (vk == 0x28) idx = cur + 1;
+                else if (vk == 0x21) idx = cur - page; else if (vk == 0x22) idx = cur + page;
+                else if (vk == 0x24) idx = 0; else if (vk == 0x23) idx = VirtualListSize - 1; else nav = false;
+                if (nav)
+                {
+                    idx = Math.Max(0, Math.Min(VirtualListSize - 1, idx));
+                    FocusedItem = Items[idx];
+                    EnsureVisible(idx);
+                    Invalidate();
+                    return;
+                }
+            }
             var mp = new Point((short)(m.LParam.ToInt64() & 0xFFFF), (short)((m.LParam.ToInt64() >> 16) & 0xFFFF));
             if (_banding)
             {
@@ -105,6 +184,7 @@ namespace S3bopus
                 }
             }
             base.WndProc(ref m);
+            if (m.Msg == 0x000F /* WM_PAINT */) DrawCursor();
             if (m.Msg == 0x000F /* WM_PAINT */ && _banding && _bandLast.Width > 0 && _bandLast.Height > 0)
                 using (var g = CreateGraphics())
                 using (var fill = new SolidBrush(Color.FromArgb(50, Ui.Accent)))
@@ -113,6 +193,26 @@ namespace S3bopus
                     g.FillRectangle(fill, _bandLast);
                     g.DrawRectangle(pen, _bandLast.X, _bandLast.Y, _bandLast.Width - 1, _bandLast.Height - 1);
                 }
+        }
+
+        // Le curseur (élément actif) n'est pas une sélection : simple contour, comme Directory Opus
+        void DrawCursor()
+        {
+            if (!Focused || VirtualListSize == 0) return;
+            var fi = FocusedItem;
+            if (fi == null || fi.Index >= VirtualListSize || SelectedIndices.Contains(fi.Index)) return;
+            if (fi.Index < (int)Native.SendMessage(Handle, 0x1027 /* LVM_GETTOPINDEX */, IntPtr.Zero, IntPtr.Zero)) return;
+            var r = fi.GetBounds(ItemBoundsPortion.ItemOnly);
+            if (!RowSelect)
+            {
+                var ic = fi.GetBounds(ItemBoundsPortion.Icon);
+                var lb = fi.GetBounds(ItemBoundsPortion.Label);
+                r = Rectangle.FromLTRB(ic.Left - 2, r.Top, Math.Min(Columns[0].Width - 1, lb.Left + TextRenderer.MeasureText(fi.Text, Font).Width + 2), r.Bottom - 1);
+            }
+            if (r.Width <= 0 || r.Top >= ClientSize.Height) return;
+            using (var g = CreateGraphics())
+            using (var pen = new Pen(Ui.Dark ? Color.FromArgb(120, 120, 120) : Color.FromArgb(140, 190, 235)))
+                g.DrawRectangle(pen, r.X, r.Y, r.Width - 1, r.Height - 1);
         }
 
         // ---- Boîte de sélection maison : elle part de n'importe où hors du nom, y compris des autres colonnes.
@@ -182,6 +282,7 @@ namespace S3bopus
 
         public void SetSortIcon(int column, bool ascending)
         {
+            _sortCol = column; _sortAsc = ascending; if (OwnerDraw) Invalidate(true);
             IntPtr header = Native.SendMessage(Handle, Native.LVM_GETHEADER, IntPtr.Zero, IntPtr.Zero);
             for (int i = 0; i < Columns.Count; i++)
             {
@@ -700,8 +801,7 @@ namespace S3bopus
                 if (topIndex >= 0 && topIndex < _view.Count) try { _lv.TopItem = _lv.Items[topIndex]; } catch { }
                 if (focusPath != null && index.TryGetValue(focusPath, out int fi))
                 {
-                    _lv.FocusedItem = _lv.Items[fi];
-                    if (keepSelected == null || keepSelected.Count == 0) _lv.SelectedIndices.Add(fi);
+                    _lv.FocusedItem = _lv.Items[fi]; // curseur seulement : rien n'est sélectionné d'office (comme Directory Opus)
                     _lv.EnsureVisible(fi);
                 }
                 else if (_view.Count > 0 && keepSelected == null)
@@ -844,6 +944,8 @@ namespace S3bopus
         public void OpenSelected()
         {
             var sel = SelectedEntries();
+            // Rien de sélectionné : Entrée ouvre l'élément sous le curseur
+            if (sel.Count == 0 && _lv.FocusedItem != null && _lv.FocusedItem.Index < _view.Count) sel = new List<Entry> { _view[_lv.FocusedItem.Index] };
             if (sel.Count == 0) return;
             var dirs = sel.Where(e => e.IsDir).ToList();
             if (dirs.Count > 0 && sel.Count == 1) { Navigate(dirs[0].FullPath); return; }

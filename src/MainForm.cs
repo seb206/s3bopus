@@ -84,7 +84,7 @@ namespace S3bopus
             {
                 ExplorerListView.RowSelect = !ExplorerListView.RowSelect;
                 _miRowSelect.Checked = ExplorerListView.RowSelect;
-                foreach (var p in AllPanes) ((ExplorerListView)p.List).FullRowSelect = ExplorerListView.RowSelect;
+                foreach (var p in AllPanes) ((ExplorerListView)p.List).ApplyRowSelect();
             }) { Checked = ExplorerListView.RowSelect };
             _miFKeys = new ToolStripMenuItem(Lang.T("Barre des touches de fonction", "Function key bar"), null, (s, e) => { _fkeys.Visible = !_fkeys.Visible; _miFKeys.Checked = _fkeys.Visible; }) { Checked = Settings.GetBool("FKeys", true) };
             _miReplace = new ToolStripMenuItem(Lang.T("Remplacer l'Explorateur Windows (dossiers et lecteurs)", "Replace Windows Explorer (folders and drives)"), null, (s, e) =>
@@ -363,7 +363,7 @@ namespace S3bopus
 
         void About()
         {
-            string text ="S3bopus " + Application.ProductVersion + " — 2026-11-06\n\n" + (Lang.En ?
+            string text ="S3bopus " + Application.ProductVersion + " — 2026-11-07\n\n" + (Lang.En ?
                 "Lightweight dual-pane file manager.\n\n" +
                 "Shortcuts:\n" +
                 "  Tab  switch pane\n" +

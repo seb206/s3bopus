@@ -26,7 +26,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
-#define VERSION "1.0.1"
+#define VERSION "1.0.2"
 #define MAXTABS 8
 #define MAXJOBS 512
 
