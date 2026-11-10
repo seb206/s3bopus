@@ -67,3 +67,25 @@ start $D/s1 $D/s3; band 520; k F5; sleep 2
 band 20; k F5; sleep 2
 [ "$(ls $D/s3 | wc -l)" = 3 ] || { echo "ECHEC mode nom : la boîte sur les noms ne sélectionne pas"; exit 1; }
 stop; echo "OK boîte de sélection (ligne et nom)"
+
+# 5. tar forgés (taille négative en base 256, ligne pax plus longue que son bloc) : ni plantage ni boucle ; dossier copié dans lui-même refusé
+mkdir -p $D/t $D/t2 $D/sc/in; echo z > $D/t/z.txt
+python3 - $D/t <<'PY'
+import sys
+d = sys.argv[1]
+def hdr(name, size, typ):
+    h = bytearray(512); h[:len(name)] = name; h[124:136] = size; h[156:157] = typ
+    return bytes(h)
+octal = lambda n: b'%011o\0' % n
+open(d + '/a-neg.tar', 'wb').write(hdr(b'x', b'\xff' * 12, b'x') + bytes(1024))                    # en-tête pax de taille -1
+open(d + '/b-neg.tar', 'wb').write(hdr(b'f', b'\xff' * 10 + b'\xfc\x00', b'0') + bytes(1024))      # fichier de taille -1024
+pax = b'999 path=abc\n'
+open(d + '/c-pax.tar', 'wb').write(hdr(b'p', octal(len(pax)), b'x') + pax.ljust(512, b'\0') + hdr(b'f', octal(0), b'0') + bytes(1024))
+PY
+start $D/t $D/t2
+k Down; k Return; k Down; k Down; k Return; k Down; k Down; k Down; k Return; k BackSpace; k End; k F5; sleep 2
+[ -e $D/t2/z.txt ] || { echo "ECHEC tar forgé (plantage ou boucle)"; exit 1; }
+stop
+start $D/sc $D/sc/in; k Down; k F5; sleep 2
+[ ! -e $D/sc/in/in ] || { echo "ECHEC dossier copié dans lui-même"; exit 1; }
+stop; echo "OK tar forgés et copie dans soi-même"

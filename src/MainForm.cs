@@ -28,6 +28,8 @@ namespace S3bopus
 
         public MainForm(string[] args)
         {
+            // L'Explorateur passe « "C:\" » pour un lecteur : Windows y lit « C:" » (antislash + guillemet), chemin invalide qui plantait au démarrage
+            args = args.Select(a => a.Trim('"', ' ')).ToArray();
             Text = "S3bopus";
             Font = Ui.Font;
             BackColor = Ui.Back;
@@ -147,6 +149,7 @@ namespace S3bopus
                 // Les nouveaux onglets reprennent les colonnes et le tri de l'onglet courant
                 var model = (side == "Left" ? _leftTabs : _rightTabs)?.Current;
                 p.ColumnWidths = model?.ColumnWidths ?? Settings.Get(side + "Columns");
+                p.ColumnOrder = model?.ColumnOrder ?? Settings.Get(side + "ColumnOrder");
                 p.SetSort(model?.SortColumn ?? Settings.GetInt(side + "Sort", 0), model?.SortAscending ?? Settings.GetBool(side + "Asc", true));
                 return p;
             }
@@ -417,7 +420,9 @@ namespace S3bopus
         {
             if (_active.IsThisPC) return;
             string dir = _active.CurrentPath;
-            try { Process.Start(new ProcessStartInfo("wt.exe", "-d \"" + dir.TrimEnd('\\') + "\\.\"") { UseShellExecute = true }); }
+            // Le dossier passe par le répertoire de travail, jamais par la ligne de commande : wt coupe ses arguments
+            // aux « ; », un dossier nommé « x; calc » y lancerait une commande
+            try { Process.Start(new ProcessStartInfo("wt.exe", "-d .") { WorkingDirectory = dir, UseShellExecute = true }); }
             catch
             {
                 try { Process.Start(new ProcessStartInfo("cmd.exe") { WorkingDirectory = dir, UseShellExecute = true }); } catch { }
@@ -555,6 +560,8 @@ namespace S3bopus
             }
             Settings.Set("LeftColumns", _left.ColumnWidths);
             Settings.Set("RightColumns", _right.ColumnWidths);
+            Settings.Set("LeftColumnOrder", _left.ColumnOrder);
+            Settings.Set("RightColumnOrder", _right.ColumnOrder);
             Settings.Set("LeftSort", _left.SortColumn);
             Settings.Set("LeftAsc", _left.SortAscending);
             Settings.Set("RightSort", _right.SortColumn);

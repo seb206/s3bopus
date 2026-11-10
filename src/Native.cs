@@ -294,7 +294,7 @@ namespace S3bopus
             {
                 for (int i = 0; i < read; i++)
                 {
-                    IntPtr item = buf + i * (IntPtr.Size * 2 + 8); // SHARE_INFO_1 : name, type, remark
+                    IntPtr item = buf + i * (IntPtr.Size * 3); // SHARE_INFO_1 : name, type (aligné sur un pointeur), remark — 24 octets en 64 bits, 12 en 32 bits
                     uint type = (uint)Marshal.ReadInt32(item, IntPtr.Size);
                     if ((type & 0xFF) == 0) list.Add(Marshal.PtrToStringUni(Marshal.ReadIntPtr(item))); // STYPE_DISKTREE
                 }

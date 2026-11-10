@@ -499,6 +499,21 @@ namespace S3bopus
             }
         }
 
+        /// <summary>Ordre d'affichage des colonnes (DisplayIndex de chaque colonne, séparés par des virgules), enregistré avec les largeurs.</summary>
+        public string ColumnOrder
+        {
+            get => string.Join(",", _lv.Columns.Cast<ColumnHeader>().Select(c => c.DisplayIndex));
+            set
+            {
+                if (string.IsNullOrEmpty(value)) return;
+                var order = value.Split(',').Select(x => int.TryParse(x, out int v) ? v : -1).ToArray();
+                // Valide seulement si c'est une permutation de 0..n-1 (réglage abîmé ou ancien : on garde l'ordre par défaut)
+                if (order.Length != _lv.Columns.Count || order.OrderBy(x => x).Where((x, i) => x != i).Any()) return;
+                for (int pos = 0; pos < order.Length; pos++)
+                    _lv.Columns[Array.IndexOf(order, pos)].DisplayIndex = pos;
+            }
+        }
+
         public void SetSort(int col, bool asc)
         {
             _sortCol = Math.Max(0, Math.Min(3, col));
@@ -1071,9 +1086,10 @@ namespace S3bopus
 
         public void SelectAll()
         {
-            _lv.BeginUpdate();
-            for (int i = 0; i < _view.Count; i++) _lv.SelectedIndices.Add(i);
-            _lv.EndUpdate();
+            // Un seul message pour toute la liste (index -1) : instantané même avec 100 000 fichiers, au lieu d'un message par ligne
+            var it = new Native.LVITEM { stateMask = 2 /* LVIS_SELECTED */, state = 2 };
+            Native.SendMessageLVItem(_lv.Handle, Native.LVM_SETITEMSTATE, (IntPtr)(-1), ref it);
+            _statusDirty = true;
         }
 
         public void InvertSelection()

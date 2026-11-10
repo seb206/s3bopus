@@ -22,6 +22,7 @@
 #include <strings.h>
 #include <sys/select.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <zlib.h>
@@ -153,7 +154,9 @@ static int arch_is_zip(const char *file) { unsigned char m[2] = {0, 0}; FILE *f 
 static AEnt *zip_list(const char *file, int *n) {
     FILE *f = fopen(file, "rb"); if (!f) return NULL;
     fseek(f, 0, SEEK_END); long sz = ftell(f), len = sz < 65557 ? sz : 65557;
-    unsigned char *b = malloc(len ? len : 1);
+    if (sz < 22) { fclose(f); return NULL; }
+    unsigned char *b = malloc(len);
+    if (!b) { fclose(f); return NULL; }
     fseek(f, sz - len, SEEK_SET);
     long e = -1;
     if (fread(b, 1, len, f) == (size_t)len) for (long i = len - 22; i >= 0; i--) if (rd32(b + i) == 0x06054b50) { e = i; break; }
@@ -161,11 +164,12 @@ static AEnt *zip_list(const char *file, int *n) {
     unsigned cnt = rd16(b + e + 10), csz = rd32(b + e + 12), coff = rd32(b + e + 16);
     free(b);
     unsigned char *cd = NULL; AEnt *a = NULL;
-    if (cnt == 0xFFFF || csz == 0xFFFFFFFFu || coff == 0xFFFFFFFFu || !(cd = malloc(csz + 1))) { fclose(f); return NULL; }
+    if (cnt == 0xFFFF || csz == 0xFFFFFFFFu || coff == 0xFFFFFFFFu || csz > (unsigned long)sz || !(cd = malloc(csz + 1))) { fclose(f); return NULL; }
     fseek(f, coff, SEEK_SET);
     if (fread(cd, 1, csz, f) != csz) { free(cd); fclose(f); return NULL; }
     fclose(f);
     a = calloc(cnt ? cnt : 1, sizeof *a);
+    if (!a) { free(cd); return NULL; }
     int k = 0; unsigned o = 0;
     for (unsigned i = 0; i < cnt && o + 46 <= csz && rd32(cd + o) == 0x02014b50; i++) {
         unsigned nl = rd16(cd + o + 28), el = rd16(cd + o + 30), cl = rd16(cd + o + 32);
@@ -198,19 +202,20 @@ static int tar_header(gzFile f, AEnt *a, long long *left) {
     for (;;) {
         if (gzread(f, h, 512) != 512 || !h[0]) return 0;
         long long size = octal((char *)h + 124, 12); char type = h[156];
+        if (size < 0) return 0;  // taille négative (base 256 forgée) : écriture hors tampon, ou retour en arrière sans fin
         if (type == 'L' || type == 'x' || type == 'g') {
             long long pad = (size + 511) / 512 * 512;
             if (size > (1 << 20)) return 0;
             char *d = malloc(pad + 1);
-            if (gzread(f, d, pad) != pad) { free(d); return 0; }
+            if (!d || gzread(f, d, pad) != pad) { free(d); return 0; }
             d[size] = 0;
             if (type == 'L') snprintf(longname, sizeof longname, "%s", d);
             else if (type == 'x')
                 for (char *q = d; q < d + size;) {  // lignes « longueur clé=valeur\n »
                     char *sp = strchr(q, ' '); long l = 0;
                     if (!sp) break;
-                    for (const char *dg = q; dg < sp && *dg >= '0' && *dg <= '9'; dg++) l = l * 10 + (*dg - '0');  // pas atol : il tire glibc 2.38
-                    if (l <= 0) break;
+                    for (const char *dg = q; dg < sp && *dg >= '0' && *dg <= '9' && l < (1 << 20); dg++) l = l * 10 + (*dg - '0');  // pas atol : il tire glibc 2.38
+                    if (l <= 0 || l > d + size - q) break;  // ligne annoncée plus longue que le bloc : on ne lit pas au-delà
                     if (!strncmp(sp + 1, "path=", 5)) { long m = l - (sp - q) - 7; if (m < 0) m = 0; if (m > ANAME - 1) m = ANAME - 1; memcpy(longname, sp + 6, m); longname[m] = 0; }
                     q += l;
                 }
@@ -431,12 +436,7 @@ static pthread_cond_t qc = PTHREAD_COND_INITIALIZER;
 
 static void enqueue(int kind, const char *src, const char *dstdir) {
     pthread_mutex_lock(&qm);
-    if (nj == MAXJOBS) {  // plein : on retire ce qui est terminé
-        int k = 0;
-        for (int i = 0; i < nj; i++) if (J[i].state == Q_WAIT || J[i].state == Q_RUN) J[k++] = J[i];
-        nj = k;
-        if (nj == MAXJOBS) { pthread_mutex_unlock(&qm); return; }
-    }
+    if (nj == MAXJOBS) { pthread_mutex_unlock(&qm); return; }  // plein : worker() retire les travaux terminés entre deux travaux
     Job *j = &J[nj++]; memset(j, 0, sizeof *j);
     j->kind = kind; snprintf(j->src, PATH_MAX, "%s", src); if (dstdir) snprintf(j->dst, PATH_MAX, "%s", dstdir);
     pthread_cond_signal(&qc); pthread_mutex_unlock(&qm); dirty = 1;
@@ -526,6 +526,8 @@ static void run_job(Job *j) {
         if (j->kind == J_MOVE && !strcmp(sd, dd)) { j->state = Q_DONE; return; }
         path_join(dst, dd, base_of(j->src));
         unique_name(dst);
+        size_t sl = strlen(j->src);
+        if (!strncmp(dst, j->src, sl) && dst[sl] == '/') { errno = EINVAL; rc = -1; goto end; }  // dossier copié dans lui-même : récursion sans fin
         j->total = tree_size(j->src, -1, 0);
         if (j->kind == J_MOVE && !rename(j->src, dst)) j->done = j->total;
         else if (j->kind == J_MOVE && errno != EXDEV) rc = -1;
@@ -535,6 +537,7 @@ static void run_job(Job *j) {
             if (!rc && j->kind == J_MOVE) { Job tmp = {0}; rc = rm_tree(&tmp, j->src); }
         }
     }
+end:
     if (rc == -2) j->state = Q_CANCEL;
     else if (rc) { j->state = Q_ERR; snprintf(j->err, sizeof j->err, "%s", strerror(errno)); }
     else j->state = Q_DONE;
@@ -545,6 +548,8 @@ static void *worker(void *arg) {
     for (;;) {
         pthread_mutex_lock(&qm);
         Job *j = NULL;
+        // Entre deux travaux, aucun pointeur sur J n'est en usage : on peut retirer ce qui est terminé sans déplacer un Job en cours
+        if (nj > MAXJOBS / 2) { int k = 0; for (int i = 0; i < nj; i++) if (J[i].state == Q_WAIT) J[k++] = J[i]; nj = k; }
         while (!j) {
             for (int i = 0; i < nj; i++) if (J[i].state == Q_WAIT) { j = &J[i]; break; }
             if (!j) pthread_cond_wait(&qc, &qm);
@@ -581,7 +586,7 @@ static void set_theme(void) {
 // Préférences (langue, thème) dans ~/.config/s3bopus.conf
 static char PREVFM[128];  // gestionnaire de dossiers d'avant S3bopus, pour le restaurer
 static void conf_path(char *b, size_t n) { const char *h = getenv("HOME"); snprintf(b, n, "%s/.config/s3bopus.conf", h ? h : "/tmp"); }
-static void conf_save(void) { char b[PATH_MAX]; conf_path(b, sizeof b); FILE *f = fopen(b, "w"); if (f) { fprintf(f, "lang=%s\ntheme=%s\nfm=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark", PREVFM); fclose(f); } }
+static void conf_save(void) { char b[PATH_MAX]; conf_path(b, sizeof b); FILE *f = fopen(b, "w"); if (f) { fprintf(f, "lang=%s\ntheme=%s\nrowsel=%d\nfm=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark", ROWSEL, PREVFM); fclose(f); } }
 static void conf_load(void) {
     char b[PATH_MAX], l[160]; conf_path(b, sizeof b); FILE *f = fopen(b, "r"); if (!f) return;
     while (fgets(l, sizeof l, f)) { if (!strncmp(l, "lang=en", 7)) EN = 1; else if (!strncmp(l, "lang=fr", 7)) EN = 0; else if (!strncmp(l, "theme=light", 11)) LIGHT = 1; else if (!strncmp(l, "theme=dark", 10)) LIGHT = 0; else if (!strncmp(l, "rowsel=", 7)) ROWSEL = l[7] != '0'; else if (!strncmp(l, "fm=", 3)) { snprintf(PREVFM, sizeof PREVFM, "%s", l + 3); PREVFM[strcspn(PREVFM, "\r\n")] = 0; } }
@@ -770,7 +775,19 @@ static void move_cur(int p, int d) {
     fix_scroll(p); dirty = 1;
 }
 static void spawn_open(const char *path) {
-    if (fork() == 0) { setsid(); int nul = open("/dev/null", O_RDWR); dup2(nul, 0); dup2(nul, 1); dup2(nul, 2); execlp("xdg-open", "xdg-open", path, (char *)NULL); _exit(1); }
+    // Double fork : pas de zombie, sans ignorer SIGCHLD (ignoré, system() et pclose() renvoient toujours -1)
+    pid_t pid = fork();
+    if (pid == 0) {
+        if (fork() == 0) { setsid(); int nul = open("/dev/null", O_RDWR); dup2(nul, 0); dup2(nul, 1); dup2(nul, 2); execlp("xdg-open", "xdg-open", path, (char *)NULL); _exit(1); }
+        _exit(0);
+    }
+    if (pid > 0) waitpid(pid, NULL, 0);
+}
+// Dossier temporaire privé dans /tmp ; 0 s'il n'est pas à nous (un autre utilisateur a pu le créer avant, ou y mettre un lien)
+static int tmp_dir(char *dir, size_t n) {
+    struct stat st; snprintf(dir, n, "/tmp/S3bopus-%d", (int)getuid());
+    mkdir(dir, 0700);
+    return !lstat(dir, &st) && S_ISDIR(st.st_mode) && st.st_uid == getuid() && !(st.st_mode & 022);
 }
 static int in_arch(int p) { return P[p].tabs[P[p].atab].arch[0]; }
 static void go_arch(int p, const char *arch, const char *inner, const char *keep) {
@@ -794,8 +811,9 @@ static void parent(int p) {
 // Ouvrir un fichier d'archive : extrait dans /tmp/S3bopus-<uid> puis xdg-open
 // shortcut: extraction synchrone (fige la fenêtre sur un gros fichier) et dossier temporaire nettoyé seulement au démarrage
 static void open_from_arch(Tab *t, const char *inner) {
-    char dir[PATH_MAX], dst[PATH_MAX]; snprintf(dir, sizeof dir, "/tmp/S3bopus-%d", (int)getuid());
-    mkdir(dir, 0700); path_join(dst, dir, base_of(inner)); unique_name(dst);
+    char dir[PATH_MAX], dst[PATH_MAX];
+    if (!tmp_dir(dir, sizeof dir)) { say(T("Dossier temporaire non sûr : %s", "Unsafe temporary folder: %s"), dir); return; }
+    path_join(dst, dir, base_of(inner)); unique_name(dst);
     Job j; memset(&j, 0, sizeof j); j.sync = 1;
     if (arch_extract(&j, t->arch, inner, dst) == 0) spawn_open(dst); else say(T("Extraction impossible", "Cannot extract"));
 }
@@ -1073,7 +1091,7 @@ static void click_row(int p, int row, unsigned state, int onname) {
 }
 
 int main(int argc, char **argv) {
-    setlocale(LC_ALL, ""); signal(SIGCHLD, SIG_IGN); signal(SIGPIPE, SIG_IGN);
+    setlocale(LC_ALL, ""); signal(SIGPIPE, SIG_IGN);
     const char *lg = getenv("LANG"); EN = !(lg && !strncmp(lg, "fr", 2)); conf_load(); { char tmp[128]; DEF = fm_query(tmp, sizeof tmp); }
     if (argc > 1 && !strcmp(argv[1], "--version")) { printf("S3bopus %s (X11)\n", VERSION); return 0; }
     if (!(dpy = XOpenDisplay(NULL))) { fprintf(stderr, "S3bopus : pas d'affichage X11 (DISPLAY)\n"); return 1; }

@@ -113,6 +113,8 @@ namespace S3bopus
         string _text = "";
         bool _online;
         float _off;
+        int _textW;   // largeur du texte, mesurée une fois par changement (pas à chaque image)
+        Bitmap _bmp;  // tampon du texte, réutilisé d'une image à l'autre
         readonly System.Windows.Forms.Timer _tick = new System.Windows.Forms.Timer { Interval = 40 };
 
         public MarqueeBox()
@@ -120,7 +122,7 @@ namespace S3bopus
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             Font = Ui.Font; BackColor = Ui.Back; ForeColor = Ui.Fore;
             Size = new Size(Ui.S(360), Ui.S(24));
-            _tick.Tick += (s, e) => { if (TextWidth() > TextArea.Width) { _off += Ui.S(1); Invalidate(); } };
+            _tick.Tick += (s, e) => { if (_textW > TextArea.Width) { _off += Ui.S(1); Invalidate(); } };
             _tick.Start();
         }
 
@@ -130,7 +132,7 @@ namespace S3bopus
         public void SetState(bool online, string text)
         {
             if (online == _online && text == _text) return;
-            _online = online; _text = text; _off = 0; Invalidate();
+            _online = online; _text = text; _off = 0; _textW = TextWidth(); Invalidate();
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -139,10 +141,11 @@ namespace S3bopus
             g.Clear(BackColor);
             var area = TextArea;
             var flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.Left;
-            int w = TextWidth();
+            int w = _textW;
             Color c = _online ? Ui.Fore : Ui.TextGray;
             // Le texte est dessiné dans un bitmap de la taille de la zone : il ne peut pas déborder à gauche vers la pastille
-            using (var bmp = new Bitmap(area.Width, Height))
+            if (_bmp == null || _bmp.Width != area.Width || _bmp.Height != Height) { _bmp?.Dispose(); _bmp = new Bitmap(area.Width, Math.Max(1, Height)); }
+            var bmp = _bmp;
             using (var gb = Graphics.FromImage(bmp))
             {
                 gb.Clear(BackColor);
@@ -164,7 +167,7 @@ namespace S3bopus
             using (var br = new SolidBrush(_online ? Color.FromArgb(16, 160, 70) : Color.FromArgb(200, 60, 50))) g.FillEllipse(br, Ui.S(6), (Height - d) / 2, d, d);
         }
 
-        protected override void Dispose(bool disposing) { if (disposing) _tick.Dispose(); base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { _tick.Dispose(); _bmp?.Dispose(); } base.Dispose(disposing); }
     }
 }
 #endif

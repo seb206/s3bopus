@@ -64,7 +64,7 @@ class Captcha:
             expires, nonce, sig = str(token).split(".")
             ok = (int(expires) >= time.time() and len(str(answer)) <= 10
                   and hmac.compare_digest(sig, self._sign(str(answer).strip(), int(expires), nonce)))
-        except ValueError:
+        except (ValueError, TypeError):  # TypeError : signature non ASCII refusée par compare_digest
             ok = False
         if not ok:
             # Chaque mauvaise réponse attend 1 s de son côté : avec une file commune, un robot qui se
@@ -134,6 +134,8 @@ def make_handler(counts: Counts, captcha: Captcha | None = None, contact: str = 
     captcha = captcha or Captcha()
 
     class Handler(BaseHTTPRequestHandler):
+        timeout = 10  # une connexion muette ne garde pas un fil ouvert sans fin
+
         def log_message(self, *args):
             pass  # aucun journal : ni IP, ni horodatage
 
@@ -163,7 +165,7 @@ def make_handler(counts: Counts, captcha: Captcha | None = None, contact: str = 
                 try:
                     size = int(self.headers.get("Content-Length") or 0)
                     data = json.loads(self.rfile.read(size)) if 0 < size <= MAX_BODY else {}
-                except ValueError:
+                except (ValueError, RecursionError):  # RecursionError : JSON de 1000 « [ » imbriqués
                     data = {}
                 if isinstance(data, dict) and captcha.check(data.get("id", ""), data.get("answer", "")):
                     return self._reply(200, {"email": contact})
