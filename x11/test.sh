@@ -6,6 +6,7 @@
 set -e
 export LANG=C.UTF-8
 D=$(mktemp -d); trap 'kill $XV $AP 2>/dev/null; rm -rf $D' EXIT
+mkdir -p $D/h/.config; export HOME=$D/h   # jamais le vrai dossier personnel : le programme y écrit favoris, session et réglages
 Xvfb :77 -screen 0 1280x800x24 >/dev/null 2>&1 & XV=$!; sleep 1; export DISPLAY=:77
 start() { ./s3bopus "$@" & AP=$!; sleep 1; W=$(xdotool search --name S3bopus | head -1); xdotool windowfocus $W; }
 stop() { kill $AP; wait $AP 2>/dev/null || true; }
@@ -55,9 +56,8 @@ cmp $D/p.png "$D/c1/Pasted image.png"
 stop; echo "OK collage texte et image"
 
 # 4. boîte de sélection partie hors du nom (colonne date / vide) : mode ligne puis mode nom
-mkdir -p $D/h/.config $D/s1 $D/s2 $D/s3 $D/s4; for f in a b c; do echo $f > $D/s1/$f.txt; done
+mkdir -p $D/s1 $D/s2 $D/s3 $D/s4; for f in a b c; do echo $f > $D/s1/$f.txt; done
 band() { xdotool mousemove 500 300 mousedown 1 mousemove 505 200 mousemove "$1" 50 mouseup 1; sleep 0.3; }
-export HOME=$D/h
 start $D/s1 $D/s2; band 520; k F5; sleep 2
 [ "$(ls $D/s2 | wc -l)" = 3 ] || { echo "ECHEC boîte en mode ligne"; exit 1; }
 stop
@@ -97,3 +97,54 @@ upd "linux=99.0.0"; echo "$TITLE" | grep -q "99.0.0" || { echo "ECHEC mise à jo
 upd "linux=$V"; [ "$TITLE" = "S3bopus $V" ] || { echo "ECHEC même version signalée : $TITLE"; exit 1; }
 upd 'linux=99.0.0; rm -rf x'; [ "$TITLE" = "S3bopus $V" ] || { echo "ECHEC texte invalide accepté : $TITLE"; exit 1; }
 echo "OK vérification de mise à jour"
+
+# 7. à propos : F1 ouvre, une touche ferme sans agir (F8 ne doit rien supprimer), puis le bouton « ? »
+mkdir -p $D/s5; start $D/s1 $D/s5; k F1; import -window root ${ABOUT:-/tmp/s3about.png} 2>/dev/null || true
+k F8; k Down; k F5; sleep 1
+[ "$(ls $D/s1 | wc -l)" = 3 ] && [ -e $D/s5/a.txt ] || { echo "ECHEC à propos : la touche de fermeture a agi, ou le clavier est resté bloqué"; exit 1; }
+xdotool mousemove $((1100 - 431)) 690 click 1; sleep 0.3; xdotool mousemove 300 300 click 1; sleep 0.3; kill -0 $AP
+stop; echo "OK à propos"
+
+# 8. favoris : F4 ajoute le dossier courant, F4 puis le favori y retourne, F3 ouvre le plus ouvert, chaque ouverture est comptée
+FAVF=$D/h/.config/s3bopus.fav; rm -f $FAVF
+start $D/s1 $D/s2
+k BackSpace; k F4; k Return                       # dossier parent ($D), ajouté aux favoris
+grep -qxP "F\t$D" $FAVF || { echo "ECHEC favori non enregistré"; cat $FAVF; exit 1; }
+k Down; k Return; k F4; k Down; k Return          # entre dans un sous-dossier, puis revient par le favori
+k F3; import -window root ${FAVSHOT:-/tmp/s3fav.png} 2>/dev/null || true; k Return   # le plus ouvert : $D
+grep -qxP "V\t3\t$D" $FAVF || { echo "ECHEC compteur d'ouvertures"; cat $FAVF; exit 1; }
+k F4; k Return                                    # on est dans $D : le retirer des favoris
+! grep -qP "^F\t" $FAVF || { echo "ECHEC favori non retiré"; cat $FAVF; exit 1; }
+stop; echo "OK favoris"
+
+# 9. conflits : la destination contient déjà les noms -> question, puis remplacer / ignorer / garder les deux / déplacer en remplaçant
+fill() { rm -rf $D/k2; mkdir -p $D/k2/sub; echo old > $D/k2/f.txt; echo old > $D/k2/sub/g.txt; echo keep > $D/k2/sub/keep.txt; }
+mkdir -p $D/k1/sub $D/k3; echo new > $D/k1/f.txt; echo new > $D/k1/sub/g.txt; echo moved > $D/k3/f.txt; fill
+start $D/k1 $D/k2
+k ctrl+a; k F5; k r; k Return; sleep 2
+[ "$(cat $D/k2/f.txt)$(cat $D/k2/sub/g.txt)$(cat $D/k2/sub/keep.txt)" = newnewkeep ] || { echo "ECHEC remplacer (fusion du dossier)"; exit 1; }
+[ -z "$(find $D/k2 -name '*.s3bopus-part')" ] || { echo "ECHEC remplacer : fichier temporaire resté"; exit 1; }
+fill; k ctrl+a; k F5; k i; k Return; sleep 2
+[ "$(cat $D/k2/f.txt)$(cat $D/k2/sub/g.txt)" = oldold ] || { echo "ECHEC ignorer"; exit 1; }
+fill; k ctrl+a; k F5; k g; k Return; sleep 2
+[ "$(cat $D/k2/f.txt)$(cat "$D/k2/f (2).txt")$(cat "$D/k2/sub (2)/g.txt")" = oldnewnew ] || { echo "ECHEC garder les deux"; exit 1; }
+[ "$(cat $D/k1/f.txt)" = new ] || { echo "ECHEC la copie a touché la source"; exit 1; }
+stop
+fill; start $D/k3 $D/k2; k Down; k F6; k r; k Return; sleep 2
+[ "$(cat $D/k2/f.txt)" = moved ] && [ ! -e $D/k3/f.txt ] || { echo "ECHEC déplacer en remplaçant"; exit 1; }
+stop; echo "OK conflits"
+
+# 10. saisie d'un chemin, tri par colonne, session : Ctrl+L va dans un dossier, clic sur « Taille », F10 enregistre, relance sans argument
+SESS=$D/h/.config/s3bopus.session; rm -f $SESS $FAVF
+start $D/s1 $D/s2
+k ctrl+l; k ctrl+u; xdotool type --window $W "$D/k1"; sleep 0.3; k Return
+xdotool mousemove 380 57 click 1; sleep 0.3
+import -window root ${SORTSHOT:-/tmp/s3sort.png} 2>/dev/null || true
+k ctrl+t; xdotool key --window $W F10 2>/dev/null || true; xdotool keyup F10; sleep 0.5
+# ^ F10 quitte : xdotool perd la fenêtre avant de relâcher la touche, qui resterait enfoncée (et se répéterait dans l'instance relancée)
+[ "$(stat -c %a $SESS)" = 600 ] || { echo "ECHEC session lisible par les autres utilisateurs"; exit 1; }
+grep -qxP "S\t0\t1\t1" $SESS || { echo "ECHEC tri non enregistré"; cat $SESS; exit 1; }
+[ "$(grep -cP "^T\t0\t[01]\t$D/k1$" $SESS)" = 2 ] && grep -qxP "T\t1\t1\t$D/s2" $SESS || { echo "ECHEC onglets non enregistrés"; cat $SESS; exit 1; }
+start; k F4; k Return; stop                      # relance sans argument : le dossier courant doit être celui de la session
+grep -qxP "F\t$D/k1" $FAVF || { echo "ECHEC session non reprise"; cat $FAVF; exit 1; }
+echo "OK chemin, tri et session"

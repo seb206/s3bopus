@@ -27,7 +27,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
-#define VERSION "1.0.3"
+#define VERSION "1.0.5"
 #define MAXTABS 8
 #define MAXJOBS 512
 
@@ -73,12 +73,17 @@ static int UPDATE = 1;  // 1 : au démarrage, lit la version publiée sur le sit
 static pthread_mutex_t pm = PTHREAD_MUTEX_INITIALIZER;
 static volatile int dirty = 1, refresh_req;
 
-static int cmp_ent(const void *a, const void *b) {
-    const Ent *x = a, *y = b;
+// Tri : colonne (0 nom, 1 taille, 2 date) et sens, par panneau ; « .. » puis les dossiers restent toujours en tête
+static int SORTC[2], SORTD[2];
+static int cmp_ent(const void *a, const void *b, void *arg) {
+    const Ent *x = a, *y = b; const int *sp = arg; int r = 0;
     if (!strcmp(x->name, "..")) return -1;
     if (!strcmp(y->name, "..")) return 1;
     if (x->dir != y->dir) return y->dir - x->dir;
-    return strcasecmp(x->name, y->name);
+    if (sp[0] == 1) r = (x->size > y->size) - (x->size < y->size);
+    else if (sp[0] == 2) r = (x->mtime > y->mtime) - (x->mtime < y->mtime);
+    if (!r) r = strcasecmp(x->name, y->name);
+    return sp[1] ? -r : r;
 }
 
 static long long tree_size(const char *p, int pane, int gen) {
@@ -110,6 +115,18 @@ static void *size_thread(void *arg) {
         pthread_mutex_unlock(&pm);
         dirty = 1;
     }
+    if (SORTC[j->pane] == 1) {  // tri par taille : on retrie maintenant que les tailles des dossiers sont connues
+        pthread_mutex_lock(&pm);
+        Pane *pp = &P[j->pane]; Tab *t = &pp->tabs[pp->atab];
+        if (pp->gen == j->gen && pp->n) {
+            char keep[256]; snprintf(keep, 256, "%s", pp->e[t->cur < pp->n ? t->cur : 0].name);
+            int sp[2] = {SORTC[j->pane], SORTD[j->pane]};
+            qsort_r(pp->e, pp->n, sizeof *pp->e, cmp_ent, sp);
+            for (int i = 0; i < pp->n; i++) if (!strcmp(pp->e[i].name, keep)) { t->cur = i; break; }
+        }
+        pthread_mutex_unlock(&pm);
+        dirty = 1;
+    }
     free(j->names); free(j);
     return NULL;
 }
@@ -118,7 +135,8 @@ static void *size_thread(void *arg) {
 enum { J_COPY, J_MOVE, J_DEL, J_EXTRACT };  // J_EXTRACT : src = « archive\1chemin dans l'archive »
 enum { Q_WAIT, Q_RUN, Q_DONE, Q_ERR, Q_CANCEL };
 // sync : exécuté dans le fil principal (ouvrir un fichier d'archive), donc insensible à la pause
-typedef struct { int kind, state, sync; char src[PATH_MAX], dst[PATH_MAX]; long long total, done; double t0, t1; volatile int cancel; char err[96]; } Job;
+enum { C_BOTH, C_REPLACE, C_SKIP, C_NEWER };  // si la destination existe : garder les deux (nom « (2) »), remplacer, ignorer, remplacer si plus récent
+typedef struct { int kind, state, sync, policy; char src[PATH_MAX], dst[PATH_MAX]; long long total, done; double t0, t1; volatile int cancel; char err[96]; } Job;
 static volatile int paused;
 static int gate(Job *j) { while (paused && !j->cancel && !j->sync) usleep(50000); return j->cancel; }
 
@@ -239,15 +257,32 @@ static int tar_header(gzFile f, AEnt *a, long long *left) {
 static AEnt *tar_list(const char *file, int *n) {
     gzFile f = gzopen(file, "rb"); if (!f) return NULL;
     int cap = 256, k = 0; AEnt *a = malloc(cap * sizeof *a), x; long long left;
-    while (tar_header(f, &x, &left)) {
-        if (x.method && x.name[0]) { if (k == cap) { cap *= 2; a = realloc(a, cap * sizeof *a); } a[k++] = x; }
+    while (a && tar_header(f, &x, &left)) {
+        if (x.method && x.name[0]) {
+            if (k == cap) { AEnt *b = realloc(a, (size_t)cap * 2 * sizeof *a); if (!b) break; a = b; cap *= 2; }  // plus de mémoire : liste tronquée
+            a[k++] = x;
+        }
         if (gzseek(f, (left + 511) / 512 * 512, SEEK_CUR) < 0) break;
     }
     gzclose(f); *n = k;
     if (!k) { free(a); return NULL; }
     return a;
 }
-static AEnt *arch_list(const char *file, int *n) { return arch_is_zip(file) ? zip_list(file, n) : tar_list(file, n); }
+// La dernière archive listée reste en mémoire : entrer dans un dossier d'un .tar.gz ne le redécompresse pas en entier.
+// Renvoie une copie (à libérer) ; le fichier modifié entre-temps (date, taille) est relu.
+static AEnt *arch_list(const char *file, int *n) {
+    static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER; static char cf[PATH_MAX]; static struct stat cs; static AEnt *ca; static int cn;
+    struct stat st; if (stat(file, &st)) return NULL;
+    pthread_mutex_lock(&m);
+    if (!ca || strcmp(cf, file) || cs.st_mtime != st.st_mtime || cs.st_size != st.st_size || cs.st_ino != st.st_ino) {
+        free(ca); cn = 0; ca = arch_is_zip(file) ? zip_list(file, &cn) : tar_list(file, &cn);
+        snprintf(cf, sizeof cf, "%s", file); cs = st;
+    }
+    AEnt *a = ca ? malloc((cn ? cn : 1) * sizeof *a) : NULL;
+    if (a) { memcpy(a, ca, cn * sizeof *a); *n = cn; }
+    pthread_mutex_unlock(&m);
+    return a;
+}
 
 // Enfants directs du dossier inner de l'archive, dans e[1..] (e[0] = « .. ») ; -1 si l'archive est illisible
 // shortcut: recherche linéaire du nom parmi les enfants, lent au-delà de ~50 000 éléments dans un même dossier
@@ -337,7 +372,7 @@ static int arch_extract(Job *j, const char *arch, const char *inner, const char 
     int n = 0, rc = 0; size_t il = strlen(inner);
     char d[PATH_MAX], par[PATH_MAX];
     if (arch_is_zip(arch)) {
-        AEnt *a = zip_list(arch, &n); FILE *f = fopen(arch, "rb");
+        AEnt *a = arch_list(arch, &n); FILE *f = fopen(arch, "rb");
         if (!a || !f) { free(a); if (f) fclose(f); return -1; }
         for (int i = 0; i < n && !rc; i++) {
             if (!is_match(a[i].name, inner, il) || unsafe_name(a[i].name)) continue;
@@ -375,6 +410,66 @@ static int arch_extract(Job *j, const char *arch, const char *inner, const char 
     return rc;
 }
 
+// ---------------------------------------------------------------- favoris
+// Manuels (FAV) et automatiques (VIS : dossiers ouverts, triés du plus ouvert au moins ouvert), dans ~/.config/s3bopus.fav :
+// lignes « F<tab>chemin » et « V<tab>nombre<tab>chemin ».
+#define MAXFAV 64
+#define MAXVIS 200
+typedef struct { char path[PATH_MAX]; int n; } Vis;
+static char FAV[MAXFAV][PATH_MAX]; static int nfav;
+static Vis VIS[MAXVIS]; static int nvis;
+// Ouvre en écriture un fichier de ~/.config, lisible par nous seuls (favoris et session nomment les dossiers ouverts) ;
+// ~/.config est créé s'il manque. O_NOFOLLOW : sans HOME on écrit dans /tmp, où un lien peut avoir été posé.
+static FILE *conf_open(const char *name) {
+    const char *h = getenv("HOME"); char b[PATH_MAX];
+    snprintf(b, sizeof b, "%s/.config", h ? h : "/tmp"); mkdir(b, 0700);
+    snprintf(b, sizeof b, "%s/.config/%s", h ? h : "/tmp", name);
+    int fd = open(b, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+    if (fd < 0) return NULL;
+    fchmod(fd, 0600);  // fichier créé par une version précédente en 0644
+    return fdopen(fd, "w");
+}
+static void fav_file(char *b, size_t n) { const char *h = getenv("HOME"); snprintf(b, n, "%s/.config/s3bopus.fav", h ? h : "/tmp"); }
+static void fav_save(void) {
+    FILE *f = conf_open("s3bopus.fav"); if (!f) return;
+    for (int i = 0; i < nfav; i++) fprintf(f, "F\t%s\n", FAV[i]);
+    for (int i = 0; i < nvis; i++) fprintf(f, "V\t%d\t%s\n", VIS[i].n, VIS[i].path);
+    fclose(f);
+}
+static void fav_load(void) {
+    char b[PATH_MAX], l[PATH_MAX + 32]; fav_file(b, sizeof b); FILE *f = fopen(b, "r"); if (!f) return;
+    while (fgets(l, sizeof l, f)) {
+        l[strcspn(l, "\n")] = 0;
+        if (l[0] == 'F' && l[1] == '\t' && l[2] == '/' && nfav < MAXFAV) snprintf(FAV[nfav++], PATH_MAX, "%s", l + 2);
+        else if (l[0] == 'V' && l[1] == '\t' && nvis < MAXVIS) {
+            int n = 0; const char *q = l + 2;
+            while (*q >= '0' && *q <= '9' && n < 100000000) n = n * 10 + (*q++ - '0');
+            if (*q == '\t' && q[1] == '/' && n > 0) { VIS[nvis].n = n; snprintf(VIS[nvis].path, PATH_MAX, "%s", q + 1); nvis++; }
+        }
+    }
+    fclose(f);
+}
+static int cmp_vis(const void *a, const void *b) { const Vis *x = a, *y = b; return x->n != y->n ? y->n - x->n : strcmp(x->path, y->path); }
+// Compte une ouverture du dossier
+// shortcut: pas de vieillissement, un dossier très ouvert autrefois reste en tête ; « Effacer » remet à zéro
+static void fav_visit(const char *path) {
+    if (strchr(path, '\n')) return;
+    int i = 0; while (i < nvis && strcmp(VIS[i].path, path)) i++;
+    if (i == nvis) {
+        if (nvis == MAXVIS) nvis = MAXVIS / 2;  // plein : la liste est triée, on oublie la moitié la moins ouverte
+        i = nvis++; snprintf(VIS[i].path, PATH_MAX, "%s", path); VIS[i].n = 0;
+    }
+    VIS[i].n++; qsort(VIS, nvis, sizeof *VIS, cmp_vis); fav_save();
+}
+static int fav_find(const char *path) { for (int i = 0; i < nfav; i++) if (!strcmp(FAV[i], path)) return i; return -1; }
+// Ajoute le dossier aux favoris, ou le retire s'il y est déjà
+static void fav_toggle(const char *path) {
+    int i = fav_find(path);
+    if (i >= 0) { memmove(FAV[i], FAV[i + 1], (size_t)(nfav - i - 1) * PATH_MAX); nfav--; }
+    else if (nfav < MAXFAV && !strchr(path, '\n')) snprintf(FAV[nfav++], PATH_MAX, "%s", path);
+    fav_save();
+}
+
 // Relit le dossier de l'onglet actif ; keep = nom sous le curseur à retrouver (ou NULL)
 static void load_pane(int p, const char *keep) {
     Pane *pp = &P[p]; Tab *t = &pp->tabs[pp->atab];
@@ -406,7 +501,7 @@ static void load_pane(int p, const char *keep) {
         n++;
     }
     if (d) closedir(d);
-    if (n) qsort(e, n, sizeof *e, cmp_ent);
+    if (n) { int sp[2] = {SORTC[p], SORTD[p]}; qsort_r(e, n, sizeof *e, cmp_ent, sp); }
     int cur = 0;
     if (keep) for (int i = 0; i < n; i++) if (!strcmp(e[i].name, keep)) { cur = i; break; }
     pthread_mutex_lock(&pm);
@@ -427,6 +522,7 @@ static void go(int p, const char *path, const char *keep) {
     if (!realpath(path, rp)) return;
     Tab *t = &P[p].tabs[P[p].atab];
     snprintf(t->path, PATH_MAX, "%s", rp); t->arch[0] = t->inner[0] = 0; t->cur = t->top = 0;
+    fav_visit(rp);
     load_pane(p, keep);
 }
 
@@ -435,12 +531,13 @@ static Job J[MAXJOBS]; static int nj;
 static pthread_mutex_t qm = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t qc = PTHREAD_COND_INITIALIZER;
 
-static void enqueue(int kind, const char *src, const char *dstdir) {
+static int enqueue(int kind, const char *src, const char *dstdir, int policy) {
     pthread_mutex_lock(&qm);
-    if (nj == MAXJOBS) { pthread_mutex_unlock(&qm); return; }  // plein : worker() retire les travaux terminés entre deux travaux
+    if (nj == MAXJOBS) { pthread_mutex_unlock(&qm); return 0; }  // plein : worker() retire les travaux terminés entre deux travaux
     Job *j = &J[nj++]; memset(j, 0, sizeof *j);
-    j->kind = kind; snprintf(j->src, PATH_MAX, "%s", src); if (dstdir) snprintf(j->dst, PATH_MAX, "%s", dstdir);
+    j->kind = kind; j->policy = policy; snprintf(j->src, PATH_MAX, "%s", src); if (dstdir) snprintf(j->dst, PATH_MAX, "%s", dstdir);
     pthread_cond_signal(&qc); pthread_mutex_unlock(&qm); dirty = 1;
+    return 1;
 }
 
 static int copy_file(Job *j, const char *s, const char *d, mode_t mode) {
@@ -461,24 +558,53 @@ static int copy_file(Job *j, const char *s, const char *d, mode_t mode) {
     return rc;
 }
 
-static int copy_tree(Job *j, const char *s, const char *d) {
-    struct stat st;
+static void unique_name(char *dst);
+// Copie (ou déplace : move) s vers d. Un dossier qui existe déjà est fusionné ; un fichier qui existe déjà suit j->policy.
+// En déplacement, chaque source est retirée dès qu'elle est arrivée : un fichier ignoré reste donc à sa place.
+static int copy_tree(Job *j, const char *s, const char *d, int move) {
+    struct stat st, dt;
     if (lstat(s, &st)) return -1;
-    if (S_ISLNK(st.st_mode)) { char l[PATH_MAX]; ssize_t n = readlink(s, l, sizeof l - 1); if (n < 0) return -1; l[n] = 0; return symlink(l, d); }
+    int ex = !lstat(d, &dt);
     if (S_ISDIR(st.st_mode)) {
-        if (mkdir(d, st.st_mode | 0700)) return -1;
+        if (ex && !S_ISDIR(dt.st_mode)) { errno = ENOTDIR; return -1; }
+        if (!ex) {
+            if (move && !rename(s, d)) return 0;  // même disque : instantané
+            if (mkdir(d, st.st_mode | 0700)) return -1;
+        }
         DIR *dir = opendir(s); if (!dir) return -1;
         struct dirent *e; int rc = 0;
         while (!rc && (e = readdir(dir))) {
             if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
             char a[PATH_MAX], b[PATH_MAX]; path_join(a, s, e->d_name); path_join(b, d, e->d_name);
-            rc = copy_tree(j, a, b);
+            rc = copy_tree(j, a, b, move);
         }
         closedir(dir);
+        if (!rc && move) rmdir(s);  // reste en place s'il contient encore des fichiers ignorés
         return rc;
     }
+    char alt[PATH_MAX + 16]; int repl = 0;
+    if (ex) {
+        if (S_ISDIR(dt.st_mode)) { errno = EISDIR; return -1; }
+        int pol = j->policy;
+        if (pol == C_NEWER) pol = st.st_mtime > dt.st_mtime ? C_REPLACE : C_SKIP;
+        if (pol == C_SKIP) { j->done += st.st_size; return 0; }
+        if (pol == C_REPLACE) repl = 1;
+        else { snprintf(alt, sizeof alt, "%s", d); unique_name(alt); d = alt; }
+    }
+    if (move && !rename(s, d)) { j->done += st.st_size; return 0; }  // rename() remplace la destination d'un coup
+    if (S_ISLNK(st.st_mode)) {
+        char l[PATH_MAX]; ssize_t n = readlink(s, l, sizeof l - 1); if (n < 0) return -1;
+        l[n] = 0; if (repl && unlink(d)) return -1;
+        if (symlink(l, d)) return -1;
+        return move ? unlink(s) : 0;
+    }
     if (!S_ISREG(st.st_mode)) return 0;
-    return copy_file(j, s, d, st.st_mode);
+    // Remplacement : copie à côté puis renommage, l'ancien fichier reste entier si la copie échoue (disque plein, annulation)
+    if (repl) { snprintf(alt, sizeof alt, "%s.s3bopus-part", d); unlink(alt); }
+    int rc = copy_file(j, s, repl ? alt : d, st.st_mode);
+    if (!rc && repl && rename(alt, d)) { int e = errno; unlink(alt); errno = e; rc = -1; }
+    if (!rc && move && unlink(s)) rc = -1;
+    return rc;
 }
 
 static int rm_tree(Job *j, const char *p) {
@@ -526,17 +652,17 @@ static void run_job(Job *j) {
         char sd[PATH_MAX]; dir_of(sd, j->src);
         if (j->kind == J_MOVE && !strcmp(sd, dd)) { j->state = Q_DONE; return; }
         path_join(dst, dd, base_of(j->src));
-        unique_name(dst);
+        struct stat st; int ex = !lstat(dst, &st);
+        // Copie dans le même dossier (doublon), ou « garder les deux » : nouveau nom « (2) » pour l'élément entier
+        if (ex && (!strcmp(sd, dd) || j->policy == C_BOTH)) { unique_name(dst); ex = 0; }
         size_t sl = strlen(j->src);
         if (!strncmp(dst, j->src, sl) && dst[sl] == '/') { errno = EINVAL; rc = -1; goto end; }  // dossier copié dans lui-même : récursion sans fin
         j->total = tree_size(j->src, -1, 0);
-        if (j->kind == J_MOVE && !rename(j->src, dst)) j->done = j->total;
-        else if (j->kind == J_MOVE && errno != EXDEV) rc = -1;
-        else {
-            rc = copy_tree(j, j->src, dst);
-            if (rc == -2) { Job tmp = {0}; tmp.cancel = 0; rm_tree(&tmp, dst); }  // copie partielle retirée
-            if (!rc && j->kind == J_MOVE) { Job tmp = {0}; rc = rm_tree(&tmp, j->src); }
-        }
+        rc = copy_tree(j, j->src, dst, j->kind == J_MOVE);
+        // Copie annulée : on retire ce qui a été créé, sauf si la destination existait déjà (fusion) ou si c'est un
+        // déplacement (les sources déjà arrivées n'existent plus ailleurs)
+        if (rc == -2 && j->kind == J_COPY && !ex) { Job tmp = {0}; rm_tree(&tmp, dst); }
+        if (!rc) j->done = j->total;
     }
 end:
     if (rc == -2) j->state = Q_CANCEL;
@@ -587,7 +713,7 @@ static void set_theme(void) {
 // Préférences (langue, thème) dans ~/.config/s3bopus.conf
 static char PREVFM[128];  // gestionnaire de dossiers d'avant S3bopus, pour le restaurer
 static void conf_path(char *b, size_t n) { const char *h = getenv("HOME"); snprintf(b, n, "%s/.config/s3bopus.conf", h ? h : "/tmp"); }
-static void conf_save(void) { char b[PATH_MAX]; conf_path(b, sizeof b); FILE *f = fopen(b, "w"); if (f) { fprintf(f, "lang=%s\ntheme=%s\nrowsel=%d\nupdate=%d\nfm=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark", ROWSEL, UPDATE, PREVFM); fclose(f); } }
+static void conf_save(void) { FILE *f = conf_open("s3bopus.conf"); if (f) { fprintf(f, "lang=%s\ntheme=%s\nrowsel=%d\nupdate=%d\nfm=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark", ROWSEL, UPDATE, PREVFM); fclose(f); } }
 static void conf_load(void) {
     char b[PATH_MAX], l[160]; conf_path(b, sizeof b); FILE *f = fopen(b, "r"); if (!f) return;
     while (fgets(l, sizeof l, f)) { if (!strncmp(l, "lang=en", 7)) EN = 1; else if (!strncmp(l, "lang=fr", 7)) EN = 0; else if (!strncmp(l, "theme=light", 11)) LIGHT = 1; else if (!strncmp(l, "theme=dark", 10)) LIGHT = 0; else if (!strncmp(l, "rowsel=", 7)) ROWSEL = l[7] != '0'; else if (!strncmp(l, "update=", 7)) UPDATE = l[7] != '0'; else if (!strncmp(l, "fm=", 3)) { snprintf(PREVFM, sizeof PREVFM, "%s", l + 3); PREVFM[strcspn(PREVFM, "\r\n")] = 0; } }
@@ -596,6 +722,7 @@ static void conf_load(void) {
 
 // Mise à jour : le site publie version.txt (« linux=1.0.2 ») ; lu avec curl dans un fil à part, rien n'est téléchargé ni installé
 static char NEWVER[16]; static volatile int newver_ready;
+static int fm_query(char *out, size_t n);
 // « a.b.c » en nombre comparable ; -1 si ce n'est pas trois nombres (pas de sscanf / atol : ils tirent glibc 2.38)
 static long ver_num(const char *s) {
     long v = 0, part = 0; int parts = 1;
@@ -608,8 +735,11 @@ static long ver_num(const char *s) {
     }
     return parts == 3 ? v * 1000 + part : -1;
 }
+static volatile int DEF;
 static void *update_thread(void *arg) {
     (void)arg;
+    { char tmp[128]; DEF = fm_query(tmp, sizeof tmp); dirty = 1; }  // xdg-mime est un script lent : pas avant l'affichage de la fenêtre
+    if (!UPDATE) return NULL;
     // S3BOPUS_UPDATE_URL : pour les essais ; développée par le shell entre guillemets, donc sans risque d'injection
     FILE *f = popen("curl -fsS -m 5 \"${S3BOPUS_UPDATE_URL:-https://s3btify.com/s3bopus/version.txt}\" 2>/dev/null", "r");
     if (!f) return NULL;
@@ -624,7 +754,6 @@ static void *update_thread(void *arg) {
 }
 
 // Gestionnaire de dossiers par défaut (xdg-mime), réversible
-static int DEF;
 static int fm_query(char *out, size_t n) {
     out[0] = 0; FILE *f = popen("xdg-mime query default inode/directory 2>/dev/null", "r"); if (!f) return 0;
     if (fgets(out, n, f)) out[strcspn(out, "\r\n")] = 0;
@@ -694,9 +823,12 @@ static void draw_pane(int p) {
     rect(x, rh, w, rh, C_BG);
     text_fit(x + 8, rh, w - 16, p == active ? C_TEXT : C_DIM, t->path);
     rect(x, rh * 2, w, rh, C_LINE);
-    text(x + 8, rh * 2, C_DIM, T("Nom", "Name"));
-    text_r(x + w - 140, rh * 2, C_DIM, T("Taille", "Size"));
-    text(x + w - 130, rh * 2, C_DIM, T("Modifié", "Modified"));
+    // en-têtes cliquables : la colonne de tri porte une flèche
+    const char *hn[3] = {T("Nom", "Name"), T("Taille", "Size"), T("Modifié", "Modified")}; char hb[3][48];
+    for (int c = 0; c < 3; c++) snprintf(hb[c], sizeof hb[c], "%s%s", hn[c], SORTC[p] != c ? "" : SORTD[p] ? " ▼" : " ▲");
+    text(x + 8, rh * 2, SORTC[p] == 0 ? C_TEXT : C_DIM, hb[0]);
+    text_r(x + w - 140, rh * 2, SORTC[p] == 1 ? C_TEXT : C_DIM, hb[1]);
+    text(x + w - 130, rh * 2, SORTC[p] == 2 ? C_TEXT : C_DIM, hb[2]);
     int rows = lh / rh;
     for (int r = 0; r < rows; r++) {
         int i = t->top + r; if (i >= pp->n) break;
@@ -707,7 +839,7 @@ static void draw_pane(int p) {
         char sz[40] = "", dt[40] = "";
         if (e->size == -1) snprintf(sz, sizeof sz, "…"); else if (e->size >= 0) fmt_size(sz, sizeof sz, e->size);
         if (e->mtime) { struct tm tm; localtime_r(&e->mtime, &tm); strftime(dt, sizeof dt, EN ? "%Y-%m-%d %H:%M" : "%d/%m/%Y %H:%M", &tm); }
-        text_fit(x + 8, y, w - 160, col, e->dir && strcmp(e->name, "..") ? e->name : e->name);
+        text_fit(x + 8, y, w - 160, col, e->name);
         text_r(x + w - 140, y, e->sel ? C_MARK : C_DIM, sz);
         text(x + w - 130, y, C_DIM, dt);
     }
@@ -744,6 +876,85 @@ static void draw_queue(void) {
     pthread_mutex_unlock(&qm);
 }
 
+// À propos (F1 ou bouton « ? ») : panneau centré, fermé par n'importe quelle touche ou un clic
+static int about;
+static void draw_about(void) {
+    char conf[PATH_MAX], cl[PATH_MAX + 64]; conf_path(conf, sizeof conf);
+    snprintf(cl, sizeof cl, "%s%s", T("Fichier de configuration : ", "Configuration file: "), conf);
+    const char *l[] = {
+        "S3bopus " VERSION " (X11)",
+        T("Explorateur de fichiers léger à deux panneaux.", "Lightweight dual-pane file manager."),
+        "",
+        T("Tab  changer de panneau          Retour arrière  dossier parent", "Tab  switch pane                 Backspace  parent folder"),
+        T("F2  renommer      F7  nouveau dossier      F8 / Suppr  supprimer", "F2  rename        F7  new folder           F8 / Del  delete"),
+        T("F5  copier vers l'autre panneau   F6  déplacer", "F5  copy to the other pane        F6  move"),
+        T("Espace / Inser  cocher            Ctrl+A  tout cocher", "Space / Ins  mark                 Ctrl+A  mark all"),
+        T("Ctrl+T / Ctrl+W  nouvel onglet / fermer    Ctrl+PgPréc / PgSuiv  onglet", "Ctrl+T / Ctrl+W  new / close tab          Ctrl+PgUp / PgDn  tab"),
+        T("Ctrl+V  coller texte ou image     Ctrl+H  fichiers cachés", "Ctrl+V  paste text or image       Ctrl+H  hidden files"),
+        T("Ctrl+L  saisir un chemin          Clic sur un en-tête  trier", "Ctrl+L  type a path               Click a header  sort"),
+        T("Ctrl+P  pause des transferts      Échap  annuler le transfert", "Ctrl+P  pause transfers           Esc  cancel the transfer"),
+        T("F3  favoris automatiques (top 10) F4  favoris", "F3  smart favorites (top 10)      F4  favorites"),
+        T("F1  à propos                      F10 / Ctrl+Q  quitter", "F1  about                         F10 / Ctrl+Q  quit"),
+        "",
+        T("Développé par Sébastien Seu", "Developed by Sébastien Seu"),
+        "Contact : https://www.linkedin.com/in/sebastienseu/",
+        cl,
+    };
+    int n = sizeof l / sizeof *l, bw = 0;
+    for (int i = 0; i < n; i++) { int w = text_w(l[i]); if (w > bw) bw = w; }
+    bw += 40; if (bw > W - 20) bw = W - 20;
+    int bh = n * rh + 24, bx = (W - bw) / 2, by = (H - bh) / 2; if (by < 0) by = 0;
+    rect(bx - 1, by - 1, bw + 2, bh + 2, C_BAR); rect(bx, by, bw, bh, C_PANEL);
+    for (int i = 0; i < n; i++) text_fit(bx + 20, by + 12 + i * rh, bw - 40, i == 0 ? C_MARK : i >= n - 3 ? C_DIR : C_TEXT, l[i]);
+}
+
+// Menu des favoris (F3 / ☆ : les 10 dossiers les plus ouverts ; F4 / ★ : favoris manuels) : flèches + Entrée, clic, Échap
+#define MROWS (MAXFAV + 1)
+static struct { int kind, cur, n; char item[MROWS][PATH_MAX + 64]; const char *target[MROWS]; } mn;
+static void menu_open(int kind) {
+    Tab *t = &P[active].tabs[P[active].atab];
+    mn.kind = kind; mn.cur = 0; mn.n = 0; dirty = 1;
+    if (kind == 1) {
+        for (int i = 0; i < nvis && i < 10; i++) { snprintf(mn.item[mn.n], sizeof mn.item[0], "%s   (%d ×)", VIS[i].path, VIS[i].n); mn.target[mn.n++] = VIS[i].path; }
+        snprintf(mn.item[mn.n], sizeof mn.item[0], "%s", nvis ? T("Effacer les favoris automatiques", "Clear smart favorites") : T("(aucun dossier pour l'instant)", "(no folders yet)"));
+        mn.target[mn.n++] = NULL;
+    } else {
+        snprintf(mn.item[mn.n], sizeof mn.item[0], "%s", t->arch[0] ? T("(archive : pas de favori ici)", "(archive: no favorite here)")
+            : fav_find(t->path) >= 0 ? T("Retirer ce dossier des favoris", "Remove this folder from favorites") : T("Ajouter ce dossier aux favoris", "Add this folder to favorites"));
+        mn.target[mn.n++] = NULL;
+        for (int i = 0; i < nfav; i++) { snprintf(mn.item[mn.n], sizeof mn.item[0], "%s", FAV[i]); mn.target[mn.n++] = FAV[i]; }
+    }
+}
+static void menu_geom(int *bx, int *by, int *bw, int *bh) {
+    int w = text_w(T("Favoris automatiques : les dossiers les plus ouverts", "Smart favorites: most opened folders"));
+    for (int i = 0; i < mn.n; i++) { int x = text_w(mn.item[i]); if (x > w) w = x; }
+    *bw = w + 40 > W - 20 ? W - 20 : w + 40; *bh = (mn.n + 1) * rh + 24;
+    *bx = (W - *bw) / 2; *by = (H - *bh) / 2; if (*by < 0) *by = 0;
+}
+static void draw_menu(void) {
+    int bx, by, bw, bh; menu_geom(&bx, &by, &bw, &bh);
+    rect(bx - 1, by - 1, bw + 2, bh + 2, C_BAR); rect(bx, by, bw, bh, C_PANEL);
+    text_fit(bx + 20, by + 8, bw - 40, C_MARK, mn.kind == 1 ? T("Favoris automatiques : les dossiers les plus ouverts", "Smart favorites: most opened folders")
+        : T("Favoris  (Suppr retire le favori sous le curseur)", "Favorites  (Del removes the favorite under the cursor)"));
+    for (int i = 0; i < mn.n; i++) {
+        int y = by + 12 + (i + 1) * rh;
+        if (i == mn.cur) rect(bx + 8, y, bw - 16, rh, C_CURROW);
+        text_fit(bx + 20, y, bw - 40, mn.target[i] ? C_DIR : C_TEXT, mn.item[i]);
+    }
+}
+static void go(int p, const char *path, const char *keep);
+// Entrée ou clic sur la ligne du curseur
+static void menu_choose(void) {
+    int kind = mn.kind; const char *tg0 = mn.target[mn.cur]; Tab *t = &P[active].tabs[P[active].atab];
+    mn.kind = 0; dirty = 1;
+    if (tg0) {
+        char path[PATH_MAX]; snprintf(path, sizeof path, "%s", tg0);  // copie : go() retrie la liste des dossiers ouverts
+        if (access(path, F_OK)) say(T("Introuvable : %s", "Not found: %s"), path); else go(active, path, NULL);
+    }
+    else if (kind == 1) { nvis = 0; fav_save(); }
+    else if (!t->arch[0]) { fav_toggle(t->path); say("%s", fav_find(t->path) >= 0 ? T("Ajouté aux favoris", "Added to favorites") : T("Retiré des favoris", "Removed from favorites")); }
+}
+
 static void draw(void) {
     rect(0, 0, W, H, C_BG);
     pthread_mutex_lock(&pm);
@@ -766,20 +977,25 @@ static void draw(void) {
         text(8, sy, C_DIM, st);
     }
     const char *keys[] = {"F2 ", "F5 ", "F6 ", "F7 ", "F8 ", "F10 "};
-    const char *lab[] = {T("Renommer", "Rename"), T("Copier", "Copy"), T("Déplacer", "Move"), T("Dossier", "New folder"), T("Supprimer", "Delete"), T("Quitter", "Quit")};
-    int fy = H - rh - 2, fw = (W - 424) / 6;
+    const char *lab[] = {T("Renommer", "Rename"), T("Copier", "Copy"), T("Déplacer", "Move"), T("Dossier", "Folder"), T("Supprimer", "Delete"), T("Quitter", "Quit")};
+    int fy = H - rh - 2, fw = (W - 514) / 6;
     rect(0, fy, W, rh + 2, C_PANEL);
     for (int i = 0; i < 6; i++) {
         text(i * fw + 8, fy + 1, C_MARK, keys[i]);
         text(i * fw + 8 + text_w(keys[i]), fy + 1, C_TEXT, lab[i]);
     }
-    // boutons langue et thème, à droite
+    // boutons à droite : à propos, sélection, gestionnaire par défaut, langue, thème
+    rect(W - 504, fy + 2, 26, rh - 2, mn.kind == 1 ? C_CURROW : C_SELROW); text(W - 504 + (26 - text_w("☆")) / 2, fy + 1, C_BAR, "☆");
+    rect(W - 474, fy + 2, 26, rh - 2, mn.kind == 2 ? C_CURROW : C_SELROW); text(W - 474 + (26 - text_w("★")) / 2, fy + 1, C_MARK, "★");
+    rect(W - 444, fy + 2, 26, rh - 2, about ? C_CURROW : C_SELROW); text(W - 444 + (26 - text_w("?")) / 2, fy + 1, C_TEXT, "?");
     { const char *rl = ROWSEL ? T("Sél. ligne", "Row select") : T("Sél. nom", "Name select"); rect(W - 414, fy + 2, 110, rh - 2, C_SELROW); text(W - 414 + (110 - text_w(rl)) / 2, fy + 1, C_TEXT, rl); }
     { const char *dl = T("Gest. défaut", "Default FM"); rect(W - 300, fy + 2, 110, rh - 2, DEF ? C_CURROW : C_SELROW); text(W - 300 + (110 - text_w(dl)) / 2, fy + 1, C_TEXT, dl); }
     rect(W - 186, fy + 2, 40, rh - 2, !EN ? C_CURROW : C_SELROW); text(W - 186 + (40 - text_w("FR")) / 2, fy + 1, C_TEXT, "FR");
     rect(W - 142, fy + 2, 40, rh - 2, EN ? C_CURROW : C_SELROW); text(W - 142 + (40 - text_w("EN")) / 2, fy + 1, C_TEXT, "EN");
     const char *tl = LIGHT ? T("Clair", "Light") : T("Sombre", "Dark");
     rect(W - 94, fy + 2, 90, rh - 2, C_SELROW); text(W - 94 + (90 - text_w(tl)) / 2, fy + 1, C_TEXT, tl);
+    if (about) draw_about();
+    if (mn.kind) draw_menu();
     XCopyArea(dpy, pix, win, gc, 0, 0, W, H, 0, 0);
     dirty = 0;
 }
@@ -878,13 +1094,32 @@ static int targets(int p, char out[][PATH_MAX], int max) {
 }
 static char tg[256][PATH_MAX];
 static void read_only(void) { say(T("Archive en lecture seule : seule la copie (extraction) est possible", "Archive is read-only: only copy (extract) works")); }
+static int pend_kind;  // transfert en attente de la réponse à la question « existe déjà »
+static void queue_targets(int kind, int policy) {
+    int n = targets(active, tg, 256), ok = 0;
+    for (int i = 0; i < n; i++) ok += enqueue(kind, tg[i], P[!active].tabs[P[!active].atab].path, policy);
+    if (ok < n) say(T("File pleine : %d élément(s) ajouté(s) sur %d, recommencez pour le reste", "Queue full: %d of %d item(s) queued, do it again for the rest"), ok, n);
+    else if (n == 256) say(T("256 éléments ajoutés à la file (le maximum à la fois) : recommencez pour le reste", "256 items queued (the most at once): do it again for the rest"));
+    else say(T("%d élément(s) ajouté(s) à la file", "%d item(s) queued"), n);
+}
+static void start_prompt(int kind, const char *label, const char *init);
 static void transfer(int kind) {
     if (in_arch(!active)) { read_only(); return; }
     if (in_arch(active)) { if (kind == J_MOVE) { read_only(); return; } kind = J_EXTRACT; }
     int n = targets(active, tg, 256);
     if (!n) return;
-    for (int i = 0; i < n; i++) enqueue(kind, tg[i], P[!active].tabs[P[!active].atab].path);
-    say(T("%d élément(s) ajouté(s) à la file", "%d item(s) queued"), n);
+    if (kind != J_EXTRACT) {  // la destination contient déjà certains noms : on demande quoi faire, une fois pour tout le transfert
+        const char *dd = P[!active].tabs[P[!active].atab].path; int c = 0;
+        for (int i = 0; i < n; i++) {
+            char sd[PATH_MAX], d[PATH_MAX]; struct stat st; dir_of(sd, tg[i]);
+            if (strcmp(sd, dd)) { path_join(d, dd, base_of(tg[i])); if (!lstat(d, &st)) c++; }
+        }
+        if (c) {
+            char l[128]; snprintf(l, sizeof l, T("%d existe(nt) déjà : (r)emplacer (i)gnorer (g)arder les deux (p)lus récent ?", "%d already exist(s): (r)eplace (s)kip (k)eep both (n)ewer?"), c);
+            pend_kind = kind; start_prompt(5, l, ""); return;
+        }
+    }
+    queue_targets(kind, C_BOTH);
 }
 static void start_prompt(int kind, const char *label, const char *init) {
     pr.kind = kind; snprintf(pr.label, sizeof pr.label, "%s", label);
@@ -901,8 +1136,19 @@ static void prompt_done(int ok) {
         int n = targets(active, tg, 1);
         if (n) { path_join(c, t->path, pr.buf); if (rename(tg[0], c)) say("%s: %s", T("Erreur", "Error"), strerror(errno)); else load_pane(active, pr.buf); }
     } else if (k == 3 && pr.len && strchr("oOyY", pr.buf[0])) {
-        int n = targets(active, tg, 256);
-        for (int i = 0; i < n; i++) enqueue(J_DEL, tg[i], NULL);
+        queue_targets(J_DEL, 0);
+    } else if (k == 5) {
+        char c = pr.len ? (char)tolower((unsigned char)pr.buf[0]) : 0;
+        int pol = c == 'r' ? C_REPLACE : c == 'i' || c == 's' ? C_SKIP : c == 'g' || c == 'k' ? C_BOTH : c == 'p' || c == 'n' ? C_NEWER : -1;
+        if (pol < 0) say(T("Transfert annulé", "Transfer cancelled")); else queue_targets(pend_kind, pol);
+    } else if (k == 4 && pr.len) {  // saisie d'un chemin : « ~ » = dossier personnel, chemin relatif = depuis le dossier affiché ; un fichier ouvre son dossier
+        char in[PATH_MAX], rp[PATH_MAX]; const char *h = getenv("HOME"); struct stat st;
+        if (pr.buf[0] == '~' && h) snprintf(in, sizeof in, "%s%s", h, pr.buf + 1);
+        else if (pr.buf[0] != '/') path_join(in, t->arch[0] ? "/" : t->path, pr.buf);
+        else snprintf(in, sizeof in, "%s", pr.buf);
+        if (!realpath(in, rp) || stat(rp, &st)) say(T("Introuvable : %s", "Not found: %s"), pr.buf);
+        else if (S_ISDIR(st.st_mode)) go(active, rp, NULL);
+        else { char d[PATH_MAX]; dir_of(d, rp); go(active, d, base_of(rp)); }
     }
 }
 static void tab_new(int p) {
@@ -994,6 +1240,57 @@ static void paste(void) {
     free(data);
 }
 
+static void ask_path(void) {
+    Tab *t = &P[active].tabs[P[active].atab]; char d[PATH_MAX];
+    if (t->arch[0]) dir_of(d, t->arch); else snprintf(d, sizeof d, "%s", t->path);
+    start_prompt(4, T("Aller à (Ctrl+U efface) :", "Go to (Ctrl+U clears):"), d);
+}
+// Session (~/.config/s3bopus.session) : taille de fenêtre, panneau actif, tri et onglets de chaque panneau.
+// Lignes « W<tab>largeur<tab>hauteur », « A<tab>panneau », « S<tab>panneau<tab>colonne<tab>sens », « T<tab>panneau<tab>actif<tab>chemin ».
+static void sess_file(char *b, size_t n) { const char *h = getenv("HOME"); snprintf(b, n, "%s/.config/s3bopus.session", h ? h : "/tmp"); }
+static void session_save(void) {
+    FILE *f = conf_open("s3bopus.session"); if (!f) return;
+    fprintf(f, "W\t%d\t%d\nA\t%d\n", W, H, active);
+    for (int p = 0; p < 2; p++) {
+        fprintf(f, "S\t%d\t%d\t%d\n", p, SORTC[p], SORTD[p]);
+        for (int i = 0; i < P[p].ntabs; i++) {
+            Tab *t = &P[p].tabs[i]; char d[PATH_MAX];
+            if (t->arch[0]) dir_of(d, t->arch); else snprintf(d, sizeof d, "%s", t->path);  // onglet dans une archive : on rouvrira son dossier
+            if (!strchr(d, '\n')) fprintf(f, "T\t%d\t%d\t%s\n", p, i == P[p].atab, d);
+        }
+    }
+    fclose(f);
+}
+// Nombre suivi d'une tabulation (pas de sscanf / atol : ils tirent glibc 2.38) ; -1 si autre chose
+static int sess_num(const char **q) {
+    int v = 0; const char *s0 = *q;
+    while (**q >= '0' && **q <= '9' && v < 100000) v = v * 10 + (*(*q)++ - '0');
+    if (*q == s0) return -1;
+    if (**q == '\t') (*q)++;
+    return v;
+}
+static void session_load(void) {
+    char b[PATH_MAX], l[PATH_MAX + 32]; sess_file(b, sizeof b); FILE *f = fopen(b, "r"); if (!f) return;
+    while (fgets(l, sizeof l, f)) {
+        l[strcspn(l, "\n")] = 0;
+        if (!l[0] || l[1] != '\t') continue;
+        const char *q = l + 2; int a = sess_num(&q), c = sess_num(&q), d = sess_num(&q);
+        if (l[0] == 'W' && a >= 400 && a <= 10000 && c >= 300 && c <= 10000) { W = a; H = c; }
+        else if (l[0] == 'A' && (a == 0 || a == 1)) active = a;
+        else if (l[0] == 'S' && (a == 0 || a == 1) && c >= 0 && c <= 2) { SORTC[a] = c; SORTD[a] = d == 1; }
+        else if (l[0] == 'T' && (a == 0 || a == 1) && P[a].ntabs < MAXTABS) {
+            const char *path = l + 2; sess_num(&path); sess_num(&path);  // le chemin suit les deux nombres
+            char rp[PATH_MAX]; struct stat st;
+            if (realpath(path, rp) && !stat(rp, &st) && S_ISDIR(st.st_mode)) {  // un dossier disparu depuis n'est pas rouvert
+                if (c == 1) P[a].atab = P[a].ntabs;
+                snprintf(P[a].tabs[P[a].ntabs++].path, PATH_MAX, "%s", rp);
+            }
+        }
+    }
+    fclose(f);
+}
+static void quit(void) { session_save(); exit(0); }
+
 static void on_key(XKeyEvent *ke) {
     char buf[64]; KeySym ks; int n;
     if (xic) { Status s; n = Xutf8LookupString(xic, ke, buf, sizeof buf - 1, &ks, &s); if (s == XLookupChars) ks = NoSymbol; }
@@ -1002,9 +1299,21 @@ static void on_key(XKeyEvent *ke) {
     buf[n] = 0;
     if (ks == NoSymbol) ks = XLookupKeysym(ke, 0);
     int ctrl = ke->state & ControlMask;
+    if (about) { about = 0; dirty = 1; return; }
+    if (mn.kind) {
+        if (ks == XK_Up) { if (mn.cur > 0) mn.cur--; }
+        else if (ks == XK_Down) { if (mn.cur < mn.n - 1) mn.cur++; }
+        else if (ks == XK_Return || ks == XK_KP_Enter) menu_choose();
+        else if (ks == XK_Delete && mn.kind == 2 && mn.target[mn.cur]) { char path[PATH_MAX]; snprintf(path, sizeof path, "%s", mn.target[mn.cur]); fav_toggle(path); menu_open(2); }
+        else mn.kind = 0;
+        dirty = 1; return;
+    }
+    if (ks == XK_F1 && !pr.kind) { about = 1; dirty = 1; return; }
+    if ((ks == XK_F3 || ks == XK_F4) && !pr.kind) { menu_open(ks == XK_F3 ? 1 : 2); return; }
     if (pr.kind) {
         if (ks == XK_Escape) prompt_done(0);
         else if (ks == XK_Return || ks == XK_KP_Enter) prompt_done(1);
+        else if (ctrl && (ks == XK_u || ks == XK_U)) { pr.len = 0; pr.buf[0] = 0; dirty = 1; }
         else if (ks == XK_BackSpace) { while (pr.len > 0 && (pr.buf[pr.len - 1] & 0xC0) == 0x80) pr.len--; if (pr.len) pr.len--; pr.buf[pr.len] = 0; dirty = 1; }
         else if (n > 0 && (unsigned char)buf[0] >= 32 && pr.len + n < (int)sizeof pr.buf - 1 && !ctrl) { memcpy(pr.buf + pr.len, buf, n); pr.len += n; pr.buf[pr.len] = 0; dirty = 1; }
         return;
@@ -1026,7 +1335,7 @@ static void on_key(XKeyEvent *ke) {
     case XK_F6: transfer(J_MOVE); break;
     case XK_F7: if (in_arch(p)) { read_only(); break; } start_prompt(1, T("Nouveau dossier :", "New folder:"), ""); break;
     case XK_F8: case XK_Delete: { if (in_arch(p)) { read_only(); break; } int c = targets(p, tg, 256); if (c) { char l[160]; snprintf(l, sizeof l, T("Supprimer %d élément(s) ? (o/n)", "Delete %d item(s)? (y/n)"), c); start_prompt(3, l, ""); } break; }
-    case XK_F10: exit(0);
+    case XK_F10: quit(); break;
     case XK_Escape:
         pthread_mutex_lock(&qm);
         for (int i = 0; i < nj; i++) if (J[i].state == Q_RUN) J[i].cancel = 1;
@@ -1039,7 +1348,8 @@ static void on_key(XKeyEvent *ke) {
         else if (ctrl && (ks == XK_h || ks == XK_H)) { show_hidden = !show_hidden; load_pane(0, NULL); load_pane(1, NULL); }
         else if (ctrl && (ks == XK_a || ks == XK_A)) { pthread_mutex_lock(&pm); for (int i = 0; i < P[p].n; i++) P[p].e[i].sel = strcmp(P[p].e[i].name, ".."); pthread_mutex_unlock(&pm); dirty = 1; }
         else if (ctrl && (ks == XK_v || ks == XK_V)) paste();
-        else if (ctrl && (ks == XK_q || ks == XK_Q)) exit(0);
+        else if (ctrl && (ks == XK_q || ks == XK_Q)) quit();
+        else if (ctrl && (ks == XK_l || ks == XK_L)) ask_path();
     }
 }
 
@@ -1082,6 +1392,15 @@ static void on_click(XButtonEvent *be) {
         dirty = 1; return;
     }
     if (be->button != Button1) return;
+    if (about) { about = 0; dirty = 1; return; }
+    if (mn.kind) {  // clic sur une ligne : la choisir ; ailleurs : fermer
+        int bx, by, bw, bh; menu_geom(&bx, &by, &bw, &bh);
+        int row = be->y >= by + 12 + rh ? (be->y - by - 12) / rh - 1 : -1;
+        if (be->x >= bx && be->x < bx + bw && row >= 0 && row < mn.n) { mn.cur = row; menu_choose(); } else { mn.kind = 0; dirty = 1; }
+        return;
+    }
+    if (be->y >= H - rh - 2 && be->x >= W - 444 && be->x < W - 418) { about = 1; dirty = 1; return; }
+    if (be->y >= H - rh - 2 && be->x >= W - 504 && be->x < W - 448) { menu_open(be->x < W - 476 ? 1 : 2); return; }
     if (be->y >= H - rh - 2) {
         if (be->x >= W - 186 && be->x < W - 146) EN = 0; else if (be->x >= W - 142 && be->x < W - 102) EN = 1;
         else if (be->x >= W - 94) { LIGHT = !LIGHT; set_theme(); }
@@ -1091,6 +1410,14 @@ static void on_click(XButtonEvent *be) {
         conf_save(); dirty = 1; return;
     }
     active = p; dirty = 1;
+    if (be->y >= rh && be->y < rh * 2) { ask_path(); return; }  // clic sur le chemin : le saisir
+    if (be->y >= rh * 2 && be->y < rh * 3) {  // clic sur un en-tête : trier (un second clic inverse le sens)
+        int c = be->x < x + w - 200 ? 0 : be->x < x + w - 134 ? 1 : 2;
+        if (SORTC[p] == c) SORTD[p] = !SORTD[p]; else { SORTC[p] = c; SORTD[p] = c != 0; }  // taille et date : du plus grand / récent d'abord
+        Tab *t = &P[p].tabs[P[p].atab]; char keep[256] = "";
+        if (t->cur < P[p].n) snprintf(keep, 256, "%s", P[p].e[t->cur].name);
+        load_pane(p, keep[0] ? keep : NULL); return;
+    }
     if (be->y < rh) {
         int tx = x + 2;
         for (int i = 0; i < P[p].ntabs; i++) { int tw = tab_w(p, i); if (be->x >= tx && be->x < tx + tw) { if (i != P[p].atab) tab_switch(p, i); return; } tx += tw; }
@@ -1122,7 +1449,7 @@ static void click_row(int p, int row, unsigned state, int onname) {
 
 int main(int argc, char **argv) {
     setlocale(LC_ALL, ""); signal(SIGPIPE, SIG_IGN);
-    const char *lg = getenv("LANG"); EN = !(lg && !strncmp(lg, "fr", 2)); conf_load(); { char tmp[128]; DEF = fm_query(tmp, sizeof tmp); }
+    const char *lg = getenv("LANG"); EN = !(lg && !strncmp(lg, "fr", 2)); conf_load(); fav_load(); if (argc == 1) session_load();  // un dossier en argument : on ouvre ce qui est demandé, sans la session
     if (argc > 1 && !strcmp(argv[1], "--version")) { printf("S3bopus %s (X11)\n", VERSION); return 0; }
     if (!(dpy = XOpenDisplay(NULL))) { fprintf(stderr, "S3bopus : pas d'affichage X11 (DISPLAY)\n"); return 1; }
     scr = DefaultScreen(dpy); vis = DefaultVisual(dpy, scr); cmap = DefaultColormap(dpy, scr);
@@ -1146,6 +1473,7 @@ int main(int argc, char **argv) {
 
     const char *home = getenv("HOME"); if (!home) home = "/";
     for (int p = 0; p < 2; p++) {
+        if (P[p].ntabs) { load_pane(p, NULL); continue; }  // onglets repris de la session
         P[p].ntabs = 1;
         snprintf(P[p].tabs[0].path, PATH_MAX, "%s", p < argc - 1 ? argv[p + 1] : home);
         char rp[PATH_MAX]; if (!realpath(P[p].tabs[0].path, rp)) snprintf(rp, PATH_MAX, "/");
@@ -1154,7 +1482,7 @@ int main(int argc, char **argv) {
     }
     { char tmp[PATH_MAX]; Job tj = {0}; snprintf(tmp, sizeof tmp, "/tmp/S3bopus-%d", (int)getuid()); rm_tree(&tj, tmp); }
     pthread_t th; pthread_create(&th, NULL, worker, NULL); pthread_detach(th);
-    if (UPDATE) { pthread_t ut; pthread_create(&ut, NULL, update_thread, NULL); pthread_detach(ut); }
+    { pthread_t ut; pthread_create(&ut, NULL, update_thread, NULL); pthread_detach(ut); }
 
     int xfd = ConnectionNumber(dpy);
     for (;;) {
@@ -1168,7 +1496,7 @@ int main(int argc, char **argv) {
             case ButtonPress: on_click(&ev.xbutton); break;
             case MotionNotify: if (bd.on) { if (!bd.moved && abs(ev.xmotion.x - bd.x0) < 4 && abs(ev.xmotion.y - bd.y0) < 4) break; bd.moved = 1; band_update(ev.xmotion.x, ev.xmotion.y); } break;
             case ButtonRelease: if (ev.xbutton.button == Button1) band_end(&ev.xbutton); break;
-            case ClientMessage: if ((Atom)ev.xclient.data.l[0] == del) return 0; break;
+            case ClientMessage: if ((Atom)ev.xclient.data.l[0] == del) quit(); break;
             }
         }
         if (refresh_req) {

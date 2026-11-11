@@ -63,6 +63,36 @@ namespace S3bopus
                     Padding = new Padding(Ui.S(4), Ui.S(2), Ui.S(4), Ui.S(2))
                 };
 
+            // ---- Favoris : deux étoiles à menu, remplies à l'ouverture
+            ToolStripMenuItem Go(string path, string hint = null) =>
+                new ToolStripMenuItem(path.Replace("&", "&&"), null, (s, e) => { _active.Navigate(path); _active.FocusList(); }) { ShortcutKeyDisplayString = hint };
+            var smart = new ToolStripDropDownButton(null, Ui.Glyph('', Color.FromArgb(0, 120, 215))) { ShowDropDownArrow = false, ToolTipText = Lang.T("Favoris automatiques : les 10 dossiers les plus ouverts", "Smart favorites: the 10 most opened folders") };
+            smart.DropDown.Renderer = new ExplorerRenderer();
+            smart.DropDownItems.Add("…");
+            smart.DropDownOpening += (s, e) =>
+            {
+                smart.DropDownItems.Clear();
+                var top = Favorites.Top(10);
+                foreach (var kv in top) smart.DropDownItems.Add(Go(kv.Key, kv.Value + " ×"));
+                if (top.Count == 0) { smart.DropDownItems.Add(new ToolStripMenuItem(Lang.T("(aucun dossier pour l'instant)", "(no folders yet)")) { Enabled = false }); return; }
+                smart.DropDownItems.Add(new ToolStripSeparator());
+                smart.DropDownItems.Add(Lang.T("Effacer les favoris automatiques", "Clear smart favorites"), null, (s2, e2) => Favorites.ClearSmart());
+            };
+            var favs = new ToolStripDropDownButton(null, Ui.Glyph('', Color.FromArgb(220, 160, 20))) { ShowDropDownArrow = false, ToolTipText = Lang.T("Favoris", "Favorites") };
+            favs.DropDown.Renderer = new ExplorerRenderer();
+            favs.DropDownItems.Add("…");
+            favs.DropDownOpening += (s, e) =>
+            {
+                favs.DropDownItems.Clear();
+                string cur = _active.CurrentPath;
+                bool real = cur != null && !_active.IsThisPC, isFav = real && Favorites.IsManual(cur);
+                favs.DropDownItems.Add(new ToolStripMenuItem(isFav ? Lang.T("Retirer ce dossier des favoris", "Remove this folder from favorites") : Lang.T("Ajouter ce dossier aux favoris", "Add this folder to favorites"),
+                    null, (s2, e2) => Favorites.Toggle(cur)) { Enabled = real });
+                var list = Favorites.Manual;
+                if (list.Count > 0) favs.DropDownItems.Add(new ToolStripSeparator());
+                foreach (var p in list) favs.DropDownItems.Add(Go(p));
+            };
+
             _commands.Items.AddRange(new ToolStripItem[]
             {
                 Cmd(Lang.T("Nouveau dossier", "New folder"), '\uE8F4', Color.FromArgb(220, 160, 20), Lang.T("Nouveau dossier (F7 / Ctrl+Maj+N)", "New folder (F7 / Ctrl+Shift+N)"), () => _active.NewFolder()),
@@ -73,6 +103,7 @@ namespace S3bopus
                 Cmd(null, '\uE8AC', ink, Lang.T("Renommer (F2)", "Rename (F2)"), () => _active.BeginRename(), false),
                 Cmd(null, '\uE74D', ink, Lang.T("Supprimer (Suppr / F8) — Maj pour supprimer définitivement", "Delete (Del / F8) — Shift to delete permanently"), () => _active.DeleteSelected((ModifierKeys & Keys.Shift) != 0), false),
                 Cmd(null, '\uE946', ink, Lang.T("Propriétés (Alt+Entrée)", "Properties (Alt+Enter)"), () => _active.ShowProperties(), false),
+                smart, favs,
                 new ToolStripSeparator(),
                 Cmd(Lang.T("Copier vers", "Copy to"), '\uE8C8', Color.FromArgb(0, 120, 215), Lang.T("Copier la sélection vers l'autre panneau (F5)", "Copy the selection to the other pane (F5)"), () => TransferToOther(JobKind.Copy)),
                 Cmd(Lang.T("Déplacer vers", "Move to"), '\uE8DE', Color.FromArgb(0, 120, 215), Lang.T("Déplacer la sélection vers l'autre panneau (F6)", "Move the selection to the other pane (F6)"), () => TransferToOther(JobKind.Move)),
@@ -83,6 +114,7 @@ namespace S3bopus
                 Cmd(null, '\uE895', ink, Lang.T("Même dossier dans l'autre panneau (Ctrl+=)", "Same folder in the other pane (Ctrl+=)"), SyncOther, false),
                 Cmd(null, '\uE756', ink, Lang.T("Ouvrir un terminal ici", "Open a terminal here"), OpenTerminal, false),
                 Cmd(null, '\uEC50', ink, Lang.T("Ouvrir ce dossier dans l'Explorateur Windows", "Open this folder in Windows Explorer"), OpenInExplorer, false),
+                Cmd(null, '', ink, Lang.T("Connecter un lecteur réseau (attribuer une lettre à un partage)", "Map a network drive (assign a letter to a share)"), MapDrive, false),
             });
 
 #if !LIGHT
@@ -165,6 +197,8 @@ namespace S3bopus
                 var p = new FilePane { Queue = _queue };
                 p.OtherPane = () => side == "Left" ? _right : _left;
                 p.Activated += x => SetActive(x);
+                // Favoris automatiques : chaque dossier réel ouvert compte (pas la réouverture des onglets au démarrage)
+                p.PathChanged += x => { if (_started && !x.IsThisPC && !x.IsArchive) Favorites.Visit(x.CurrentPath); };
                 // Les nouveaux onglets reprennent les colonnes et le tri de l'onglet courant
                 var model = (side == "Left" ? _leftTabs : _rightTabs)?.Current;
                 p.ColumnWidths = model?.ColumnWidths ?? Settings.Get(side + "Columns");
@@ -260,6 +294,7 @@ namespace S3bopus
                 RestoreTabs(_rightTabs, "Right", rightPath, args.Length > 1);
                 SetActive(_left);
                 _left.FocusList();
+                _started = true;
                 if (Settings.GetBool("UpdateCheck", true)) CheckUpdate();
             };
             _split.Resize += (s, e) => ApplyRatio();
@@ -463,6 +498,17 @@ namespace S3bopus
             {
                 try { Process.Start(new ProcessStartInfo("cmd.exe") { WorkingDirectory = dir, UseShellExecute = true }); } catch { }
             }
+        }
+
+        bool _started;
+
+        /// <summary>Boîte Windows « Connecter un lecteur réseau » ; sur un partage (\\serveur\partage\...), il est proposé d'office.</summary>
+        void MapDrive()
+        {
+            string p = _active.CurrentPath ?? "";
+            var m = System.Text.RegularExpressions.Regex.Match(p, @"^\\\\[^\\?]+\\[^\\]+");
+            Native.MapDrive(Handle, m.Success ? m.Value : null);
+            foreach (var pane in AllPanes) if (pane.CurrentPath == AddressBar.ThisPC) pane.Reload(true);
         }
 
         void OpenInExplorer()

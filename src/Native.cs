@@ -131,6 +131,46 @@ namespace S3bopus
 
         public static readonly Guid FOLDERID_Downloads = new Guid("374DE290-123F-4565-9164-39C4925E467B");
 
+        // ---------- Lecteur réseau ----------
+        [DllImport("mpr.dll")]
+        static extern int WNetConnectionDialog(IntPtr hwnd, int dwType);
+        [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+        static extern int WNetConnectionDialog1(ref CONNECTDLGSTRUCT dlg);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct NETRESOURCE
+        {
+            public int dwScope, dwType, dwDisplayType, dwUsage;
+            public string lpLocalName, lpRemoteName, lpComment, lpProvider;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct CONNECTDLGSTRUCT
+        {
+            public int cbStructure;
+            public IntPtr hwndOwner, lpConnRes;
+            public int dwFlags, dwDevNum;
+        }
+
+        /// <summary>Boîte standard « Connecter un lecteur réseau ». share (\\serveur\partage) : proposé d'office, null : saisie libre.</summary>
+        public static void MapDrive(IntPtr owner, string share)
+        {
+            if (share != null)
+            {
+                var nr = new NETRESOURCE { dwType = 1 /* RESOURCETYPE_DISK */, lpRemoteName = share };
+                IntPtr p = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(NETRESOURCE)));
+                Marshal.StructureToPtr(nr, p, false);
+                try
+                {
+                    var dlg = new CONNECTDLGSTRUCT { cbStructure = Marshal.SizeOf(typeof(CONNECTDLGSTRUCT)), hwndOwner = owner, lpConnRes = p, dwFlags = 1 /* CONNDLG_RO_PATH */ };
+                    int r = WNetConnectionDialog1(ref dlg);
+                    if (r == 0 || r == -1) return; // connecté, ou annulé par l'utilisateur
+                }
+                finally { Marshal.DestroyStructure(p, typeof(NETRESOURCE)); Marshal.FreeHGlobal(p); }
+            }
+            WNetConnectionDialog(owner, 1);
+        }
+
         // ---------- ShellExecute ----------
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct SHELLEXECUTEINFO
