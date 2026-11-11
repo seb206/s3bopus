@@ -16,6 +16,8 @@ namespace S3bopus
     {
         public string Name, FullPath;
         public bool IsDir, IsDrive;
+        public int Group;           // Ce PC : 0 disques fixes, 1 amovibles, 2 réseau
+        public bool IsHeader;       // Ce PC : ligne de titre d'un groupe (ni sélectionnable ni ouvrable)
         public long Size;           // fichiers : taille ; lecteurs : capacité totale
         public long Free = -1;      // lecteurs : espace libre
         public DateTime Modified;
@@ -478,7 +480,8 @@ namespace S3bopus
         }
 
         public ListView List => _lv;
-        public bool IsThisPC => CurrentPath == AddressBar.ThisPC;
+        /// <summary>Vue virtuelle sans dossier réel : « Ce PC » ou « Réseau ».</summary>
+        public bool IsThisPC => CurrentPath == AddressBar.ThisPC || CurrentPath == AddressBar.Network;
         public bool IsEditing => _editingLabel;
         public void FocusList() => _lv.Focus();
         public void FocusAddress() => _address.BeginEdit();
@@ -536,7 +539,7 @@ namespace S3bopus
         public List<Entry> SelectedEntries()
         {
             var list = new List<Entry>();
-            foreach (int i in _lv.SelectedIndices) if (i >= 0 && i < _view.Count) list.Add(_view[i]);
+            foreach (int i in _lv.SelectedIndices) if (i >= 0 && i < _view.Count && !_view[i].IsHeader) list.Add(_view[i]);
             return list;
         }
 
@@ -549,7 +552,7 @@ namespace S3bopus
         {
             if (string.IsNullOrWhiteSpace(path)) return false;
             string archive = null, inner = null;
-            if (path != AddressBar.ThisPC)
+            if (path != AddressBar.ThisPC && path != AddressBar.Network)
             {
                 try
                 {
@@ -597,7 +600,7 @@ namespace S3bopus
         {
             _btnBack.Enabled = _back.Count > 0;
             _btnFwd.Enabled = _fwd.Count > 0;
-            _btnUp.Enabled = !IsThisPC;
+            _btnUp.Enabled = CurrentPath != AddressBar.ThisPC;
         }
 
         public void Back()
@@ -619,7 +622,9 @@ namespace S3bopus
 
         public void GoUp()
         {
-            if (IsThisPC) return;
+            if (CurrentPath == AddressBar.ThisPC) return;
+            if (CurrentPath == AddressBar.Network) { Navigate(AddressBar.ThisPC, true, CurrentPath); return; }
+            if (IsServer(CurrentPath)) { Navigate(AddressBar.Network, true, CurrentPath); return; }
             string parent = Path.GetDirectoryName(CurrentPath);
             if (parent == null && CurrentPath.StartsWith(@"\\") && !IsServer(CurrentPath) && CurrentPath.IndexOf('\\', 2) > 0 && CurrentPath.IndexOf('\\', CurrentPath.IndexOf('\\', 2) + 1) < 0)
                 parent = CurrentPath.Substring(0, CurrentPath.IndexOf('\\', 2));
@@ -673,7 +678,7 @@ namespace S3bopus
 
             string archive = _archiveFile, inner = _archiveInner;
             var ui = TaskScheduler.FromCurrentSynchronizationContext();
-            Task.Run(() => path == AddressBar.ThisPC ? LoadDrives() : IsServer(path) ? LoadShares(path) : archive != null ? LoadArchive(archive, inner, path) : LoadFolder(path, hidden)).ContinueWith(t =>
+            Task.Run(() => path == AddressBar.ThisPC ? LoadDrives() : path == AddressBar.Network ? LoadNetwork() : IsServer(path) ? LoadShares(path) : archive != null ? LoadArchive(archive, inner, path) : LoadFolder(path, hidden)).ContinueWith(t =>
             {
                 if (gen != _gen || IsDisposed) return;
                 if (t.IsFaulted)
@@ -690,7 +695,7 @@ namespace S3bopus
                 }
                 _all = t.Result;
                 if (path == AddressBar.ThisPC)
-                    foreach (var d in _all) d.Name = SysIcons.DisplayName(d.FullPath);
+                    foreach (var d in _all) if (d.IsDrive) d.Name = SysIcons.DisplayName(d.FullPath);
 
                 if (_pendingSelect != null) { selectPath = _pendingSelect; _pendingSelect = null; }
                 ApplyView(keep, selectPath ?? focused, topIndex);
@@ -761,12 +766,59 @@ namespace S3bopus
             finally { Cursor.Current = old; }
         }
 
+        /// <summary>
+        /// Machines du réseau local qui partagent des fichiers : celles qui répondent sur le port 445 (SMB) dans le sous-réseau
+        /// de chaque carte ayant une passerelle. La liste « Réseau » de Windows est souvent vide (découverte désactivée), pas celle-ci.
+        /// </summary>
+        static List<Entry> LoadNetwork()
+        {
+            uint Num(System.Net.IPAddress a) { var b = a.GetAddressBytes(); return (uint)(b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3]); }
+            var probes = new List<(System.Net.IPAddress ip, System.Net.Sockets.TcpClient client, Task task)>();
+            foreach (var n in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (n.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                var props = n.GetIPProperties();
+                if (props.GatewayAddresses.Count == 0) continue; // cartes virtuelles (Hyper-V, WSL) : rien à y chercher
+                foreach (var u in props.UnicastAddresses)
+                {
+                    if (u.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || u.IPv4Mask == null) continue;
+                    uint ip = Num(u.Address), mask = Num(u.IPv4Mask);
+                    // shortcut: sous-réseaux jusqu'à /22 (1022 adresses) ; plus grand, saisir le nom du serveur dans la barre d'adresse
+                    if (mask < 0xFFFFFC00) continue;
+                    for (uint a = (ip & mask) + 1; a < (ip | ~mask); a++)
+                    {
+                        var addr = new System.Net.IPAddress(new[] { (byte)(a >> 24), (byte)(a >> 16), (byte)(a >> 8), (byte)a });
+                        var c = new System.Net.Sockets.TcpClient();
+                        probes.Add((addr, c, c.ConnectAsync(addr, 445)));
+                    }
+                }
+            }
+            try { Task.WaitAll(probes.Select(p => p.task).ToArray(), 900); } catch { } // les refus de connexion lèvent : c'est attendu
+            var found = new List<(System.Net.IPAddress ip, Task<System.Net.IPHostEntry> name)>();
+            foreach (var p in probes)
+            {
+                if (p.task.Status == TaskStatus.RanToCompletion) found.Add((p.ip, System.Net.Dns.GetHostEntryAsync(p.ip)));
+                p.client.Close();
+            }
+            try { Task.WaitAll(found.Select(f => (Task)f.name).ToArray(), 1500); } catch { } // pas de nom : on garde l'adresse
+            var list = new List<Entry>();
+            foreach (var f in found)
+            {
+                string ip = f.ip.ToString();
+                string name = f.name.Status == TaskStatus.RanToCompletion ? f.name.Result.HostName : ip;
+                // On navigue par l'adresse (toujours joignable) ; le nom n'est que l'affichage
+                list.Add(new Entry { Name = name, FullPath = @"\\" + ip, IsDir = true, Size = -1, Attributes = FileAttributes.Directory, Type = ip });
+            }
+            return list;
+        }
+
         static List<Entry> LoadDrives()
         {
             var list = new List<Entry>();
             foreach (var d in DriveInfo.GetDrives())
             {
                 var e = new Entry { Name = d.Name, FullPath = d.Name, IsDir = true, IsDrive = true, Size = -1, Attributes = FileAttributes.Directory };
+                e.Group = d.DriveType == DriveType.Network ? 2 : d.DriveType == DriveType.Fixed ? 0 : 1;
                 try
                 {
                     if (d.IsReady) { e.Size = d.TotalSize; e.Free = d.AvailableFreeSpace; }
@@ -781,6 +833,14 @@ namespace S3bopus
                     default: e.Type = Lang.T("Lecteur", "Drive"); break;
                 }
                 list.Add(e);
+            }
+            // Groupe Réseau : les lecteurs réseau connectés, puis l'entrée qui ouvre l'explorateur réseau
+            list.Add(new Entry { Name = Lang.T("Explorer le réseau", "Browse the network"), FullPath = AddressBar.Network, IsDir = true, Group = 2, Size = -1, Attributes = FileAttributes.Directory, Type = Lang.T("Ordinateurs du réseau local", "Computers on the local network") });
+            string[] titles = { Lang.T("Disques locaux", "Local disks"), Lang.T("Lecteurs amovibles", "Removable drives"), Lang.T("Réseau", "Network") };
+            for (int g = 0; g < 3; g++)
+            {
+                int count = list.Count(x => x.Group == g && x.IsDrive);
+                if (count > 0 || g == 2) list.Add(new Entry { Name = titles[g] + (count > 0 ? " (" + count + ")" : ""), FullPath = "", IsHeader = true, Group = g, Size = -1, Type = "" });
             }
             return list;
         }
@@ -832,6 +892,9 @@ namespace S3bopus
 
         int Compare(Entry a, Entry b)
         {
+            // Ce PC : groupes dans l'ordre, titre en tête de son groupe, quel que soit le sens du tri
+            if (a.Group != b.Group) return a.Group.CompareTo(b.Group);
+            if (a.IsHeader != b.IsHeader) return a.IsHeader ? -1 : 1;
             if (a.IsDir != b.IsDir) return a.IsDir ? -1 : 1;
             int r = 0;
             switch (_sortCol)
@@ -858,6 +921,11 @@ namespace S3bopus
         {
             if (e.ItemIndex < 0 || e.ItemIndex >= _view.Count) { e.Item = new ListViewItem(""); return; }
             var en = _view[e.ItemIndex];
+            if (en.IsHeader)
+            {
+                e.Item = new ListViewItem(new[] { en.Name, "", "", "" }, -1) { ForeColor = Ui.Dark ? Color.FromArgb(90, 170, 255) : Ui.Accent, Font = _headerFont };
+                return;
+            }
             if (en.Icon < 0) en.Icon = en.IsDrive ? SysIcons.IconForPath(en.FullPath) : SysIcons.IconFor(en.FullPath, en.IsDir);
             var it = new ListViewItem(en.Name, en.Icon);
             if (en.IsDrive)
@@ -883,6 +951,8 @@ namespace S3bopus
             e.Item = it;
         }
 
+        static readonly Font _headerFont = new Font(Ui.Font, FontStyle.Bold);
+
         void Lv_SearchForVirtualItem(object sender, SearchForVirtualItemEventArgs e)
         {
             int start = Math.Max(0, e.StartIndex);
@@ -897,7 +967,7 @@ namespace S3bopus
         {
             if (CurrentPath == null) return;
             var sel = SelectedEntries();
-            string s = Fmt.Count(_view.Count, Lang.T("élément", "item"), Lang.T("éléments", "items"));
+            string s = Fmt.Count(_view.Count(e => !e.IsHeader), Lang.T("élément", "item"), Lang.T("éléments", "items"));
             if (_view.Count != _all.Count) s += Lang.T(" (filtrés sur ", " (filtered from ") + _all.Count + ")";
 
             IEnumerable<Entry> scope = sel.Count > 0 ? sel : _view;
@@ -960,7 +1030,7 @@ namespace S3bopus
         {
             var sel = SelectedEntries();
             // Rien de sélectionné : Entrée ouvre l'élément sous le curseur
-            if (sel.Count == 0 && _lv.FocusedItem != null && _lv.FocusedItem.Index < _view.Count) sel = new List<Entry> { _view[_lv.FocusedItem.Index] };
+            if (sel.Count == 0 && _lv.FocusedItem != null && _lv.FocusedItem.Index < _view.Count && !_view[_lv.FocusedItem.Index].IsHeader) sel = new List<Entry> { _view[_lv.FocusedItem.Index] };
             if (sel.Count == 0) return;
             var dirs = sel.Where(e => e.IsDir).ToList();
             if (dirs.Count > 0 && sel.Count == 1) { Navigate(dirs[0].FullPath); return; }

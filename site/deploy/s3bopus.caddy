@@ -8,5 +8,5 @@ handle /s3bopus/count* {
 @bopus_downloads path /s3bopus/downloads/*
 header @bopus_downloads Content-Disposition attachment
 
-@bopus_page path /s3bopus /s3bopus/ /s3bopus/index.html /s3bopus/app.js /s3bopus/style.css
+@bopus_page path /s3bopus /s3bopus/ /s3bopus/index.html /s3bopus/app.js /s3bopus/style.css /s3bopus/version.txt
 header @bopus_page Cache-Control "no-cache"

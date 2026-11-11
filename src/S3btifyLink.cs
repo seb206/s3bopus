@@ -11,12 +11,26 @@ using System.Windows.Forms;
 namespace S3bopus
 {
     /// <summary>
-    /// Lien avec S3btify (0.15.31+), version Windows complète seulement : lit le morceau en cours et les suivants, envoie précédent / lecture-pause / suivant.
+    /// Lien avec S3btify (0.15.30A+), version Windows complète seulement : lit le morceau en cours et les suivants, envoie précédent / lecture-pause / suivant.
     /// Local uniquement (127.0.0.1:34565). Interface : GET /api/player (JSON) et POST /api/player/{prev|playpause|next}.
     /// </summary>
     internal static class S3btifyLink
     {
-        public static readonly System.Version MinVersion = new System.Version(0, 15, 31);
+        /// <summary>Version minimale. Une lettre de révision peut suivre le numéro : 0.15.30 &lt; 0.15.30A &lt; 0.15.30B &lt; 0.15.31.</summary>
+        public const string MinVersion = "0.15.30A";
+
+        /// <summary>Clé triable d'une version « a.b.c » ou « a.b.cL » (null si le format est autre) : nombres complétés à 6 chiffres, puis la lettre.</summary>
+        static string VersionKey(string v)
+        {
+            var m = Regex.Match(v ?? "", @"^(\d{1,6})\.(\d{1,6})\.(\d{1,6})([A-Za-z]?)$");
+            return m.Success ? m.Groups[1].Value.PadLeft(6, '0') + m.Groups[2].Value.PadLeft(6, '0') + m.Groups[3].Value.PadLeft(6, '0') + m.Groups[4].Value.ToUpperInvariant() : null;
+        }
+
+        internal static bool Supported(string version)
+        {
+            string k = VersionKey(version);
+            return k != null && string.CompareOrdinal(k, VersionKey(MinVersion)) >= 0;
+        }
         public static int Port => Settings.GetInt("S3btifyPort", 34565);
 
         public static volatile bool Available;   // S3btify répond et sa version est >= MinVersion
@@ -75,9 +89,10 @@ namespace S3bopus
                 using (var rd = new StreamReader(resp.GetResponseStream()))
                 {
                     string json = rd.ReadToEnd();
-                    if (json.Length < 20000 && Field(json, "app") == "S3btify" && System.Version.TryParse(Field(json, "version"), out var v) && v >= MinVersion)
+                    string v = Field(json, "version");
+                    if (json.Length < 20000 && Field(json, "app") == "S3btify" && Supported(v))
                     {
-                        avail = true; ver = v.ToString();
+                        avail = true; ver = v;
                         playing = Regex.IsMatch(json, "\"playing\"\\s*:\\s*true");
                         title = Field(json, "title"); artist = Field(json, "artist"); album = Field(json, "album");
                         next = NextTracks(json);

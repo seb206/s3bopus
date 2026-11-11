@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -86,7 +86,7 @@ namespace S3bopus
             });
 
 #if !LIGHT
-            // ---- Lien S3btify (0.15.31+) : précédent / lecture-pause / suivant, visibles seulement si S3btify répond
+            // ---- Lien S3btify (0.15.30A+) : précédent / lecture-pause / suivant, visibles seulement si S3btify répond
             _tbSep = new ToolStripSeparator { Visible = false };
             _tbPrev = Cmd(null, '', ink, Lang.T("S3btify : morceau précédent", "S3btify: previous track"), () => S3btifyLink.Send("prev"), false);
             _tbPlay = Cmd(null, '', ink, Lang.T("S3btify : lecture / pause", "S3btify: play / pause"), () => S3btifyLink.Send("playpause"), false);
@@ -132,6 +132,25 @@ namespace S3bopus
 #if !LIGHT
             more.DropDownItems.Insert(4, _miLink);
 #endif
+            ToolStripMenuItem miUpdate = null;
+            miUpdate = new ToolStripMenuItem(Lang.T("Vérifier les mises à jour au démarrage", "Check for updates at startup"), null, (s, e) =>
+            {
+                miUpdate.Checked = !miUpdate.Checked;
+                Settings.Set("UpdateCheck", miUpdate.Checked);
+            }) { Checked = Settings.GetBool("UpdateCheck", true) };
+            more.DropDownItems.Insert(more.DropDownItems.Count - 1, miUpdate);
+            // Transparence de toute la fenêtre (on voit le bureau à travers), réglage « Opacity » en %, comme dans s3bXterm
+            var miOp = new ToolStripMenuItem(Lang.T("Transparence de la fenêtre", "Window transparency"));
+            Opacity = Math.Max(30, Math.Min(100, Settings.GetInt("Opacity", 100))) / 100.0;
+            foreach (int pct in new[] { 100, 90, 80, 70, 60, 50, 40 })
+            {
+                int p = pct;
+                var it = new ToolStripMenuItem(p == 100 ? Lang.T("Aucune (opaque)", "None (opaque)") : (100 - p) + " %") { Checked = Math.Round(Opacity * 100) == p };
+                it.Click += (s, e) => { Opacity = p / 100.0; Settings.Set("Opacity", p); foreach (ToolStripMenuItem o in miOp.DropDownItems) o.Checked = o == it; };
+                miOp.DropDownItems.Add(it);
+            }
+            miOp.DropDown.Renderer = new ExplorerRenderer();
+            more.DropDownItems.Insert(more.DropDownItems.Count - 1, miOp);
             more.DropDown.Renderer = new ExplorerRenderer();
             _commands.Items.Add(more);
             // Langue et thème : enregistrés puis appliqués en relançant l'application
@@ -241,6 +260,7 @@ namespace S3bopus
                 RestoreTabs(_rightTabs, "Right", rightPath, args.Length > 1);
                 SetActive(_left);
                 _left.FocusList();
+                if (Settings.GetBool("UpdateCheck", true)) CheckUpdate();
             };
             _split.Resize += (s, e) => ApplyRatio();
         }
@@ -280,6 +300,22 @@ namespace S3bopus
         }
 #endif
 
+        /// <summary>Lit la version publiée sur le site ; plus récente, propose d'ouvrir la page de téléchargement (une seule fois par version).</summary>
+        void CheckUpdate()
+        {
+            var ui = System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext();
+            System.Threading.Tasks.Task.Run(() => UpdateCheck.Latest()).ContinueWith(t =>
+            {
+                string latest = t.Result; // Latest() ne lève jamais
+                if (IsDisposed || !UpdateCheck.IsNewer(latest, UpdateCheck.Current) || Settings.Get("UpdateSkipped") == latest) return;
+                string text = Lang.T("S3bopus " + latest + " est disponible (vous avez la " + UpdateCheck.Current + ").\n\nOuvrir la page de téléchargement ?",
+                    "S3bopus " + latest + " is available (you have " + UpdateCheck.Current + ").\n\nOpen the download page?");
+                if (MessageBox.Show(this, text, Lang.T("Mise à jour", "Update"), MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    try { Process.Start(UpdateCheck.Page); } catch { }
+                else Settings.Set("UpdateSkipped", latest); // refusée : on ne la repropose plus
+            }, ui);
+        }
+
         void Relaunch(string key, bool value)
         {
             Settings.Set(key, value);
@@ -296,7 +332,7 @@ namespace S3bopus
         }
 
         static string SafePath(string path) =>
-            path == AddressBar.ThisPC || Directory.Exists(path) || Archives.Split(path, out _, out _) ? path : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            path == AddressBar.ThisPC || path == AddressBar.Network || Directory.Exists(path) || Archives.Split(path, out _, out _) ? path : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         /// <summary>Rouvre les onglets enregistrés ; un dossier passé en ligne de commande remplace l'onglet courant.</summary>
         static void RestoreTabs(PaneTabs tabs, string side, string path, bool fromArgs)
@@ -431,12 +467,12 @@ namespace S3bopus
 
         void OpenInExplorer()
         {
-            try { Process.Start("explorer.exe", _active.IsThisPC ? "shell:MyComputerFolder" : "\"" + _active.CurrentPath + "\""); } catch { }
+            try { Process.Start("explorer.exe", _active.CurrentPath == AddressBar.Network ? "shell:NetworkPlacesFolder" : _active.IsThisPC ? "shell:MyComputerFolder" : "\"" + _active.CurrentPath + "\""); } catch { }
         }
 
         void About()
         {
-            string text ="S3bopus " + Application.ProductVersion + " — 2026-11-07\n\n" + (Lang.En ?
+            string text ="S3bopus " + UpdateCheck.Current + " — 2026-11-11\n\n" + (Lang.En ?
                 "Lightweight dual-pane file manager.\n\n" +
                 "Shortcuts:\n" +
                 "  Tab  switch pane\n" +
@@ -472,13 +508,20 @@ namespace S3bopus
         void ShowAbout(string text)
         {
             using (var f = new Form { Text = Lang.T("À propos de S3bopus", "About S3bopus"), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, BackColor = Ui.Back, ForeColor = Ui.Fore, Font = Ui.Font, ClientSize = new Size(Ui.S(520), Ui.S(430)) })
+                MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, BackColor = Ui.Back, ForeColor = Ui.Fore, Font = Ui.Font, ClientSize = new Size(Ui.S(520), Ui.S(470)) })
             {
                 var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, FlatStyle = FlatStyle.Flat, BackColor = Ui.Hover, ForeColor = Ui.Fore, Size = new Size(Ui.S(90), Ui.S(28)), Dock = DockStyle.None };
                 ok.FlatAppearance.BorderColor = Ui.Border;
                 ok.Location = new Point(f.ClientSize.Width - ok.Width - Ui.S(16), f.ClientSize.Height - ok.Height - Ui.S(14));
-                var lbl = new Label { Text = text, AutoSize = false, Location = new Point(Ui.S(20), Ui.S(16)), Size = new Size(f.ClientSize.Width - Ui.S(40), f.ClientSize.Height - Ui.S(70)), ForeColor = Ui.Fore, BackColor = Ui.Back };
-                f.Controls.AddRange(new Control[] { lbl, ok });
+                var lbl = new Label { Text = text, AutoSize = false, Location = new Point(Ui.S(20), Ui.S(16)), Size = new Size(f.ClientSize.Width - Ui.S(40), Ui.S(305)), ForeColor = Ui.Fore, BackColor = Ui.Back };
+                var dev = new Label { Text = Lang.T("Développé par Sébastien Seu", "Developed by Sébastien Seu"), Left = lbl.Left, Top = lbl.Bottom + Ui.S(8), Width = lbl.Width, Height = Ui.Font.Height + Ui.S(4), ForeColor = Ui.Fore };
+                const string linkedin = "https://www.linkedin.com/in/sebastienseu/";
+                var link = new LinkLabel { Left = lbl.Left, Top = dev.Bottom, Width = lbl.Width, Height = Ui.Font.Height + Ui.S(4), Text = "Contact : " + linkedin, ForeColor = Ui.Fore, LinkColor = Color.FromArgb(70, 150, 235), ActiveLinkColor = Color.FromArgb(70, 150, 235) };
+                link.LinkArea = new LinkArea("Contact : ".Length, linkedin.Length);
+                link.LinkClicked += (s, e) => { try { Process.Start(new ProcessStartInfo(linkedin) { UseShellExecute = true }); } catch { } };
+                var dir = new Label { Left = lbl.Left, Top = link.Bottom + Ui.S(10), Width = lbl.Width - ok.Width - Ui.S(10), Height = Ui.Font.Height * 2 + Ui.S(4), ForeColor = Ui.Fore,
+                    Text = Lang.T("Dossier de configuration : ", "Configuration folder: ") + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "S3bopus") };
+                f.Controls.AddRange(new Control[] { lbl, dev, link, dir, ok });
                 f.AcceptButton = f.CancelButton = ok;
                 f.ShowDialog(this);
             }

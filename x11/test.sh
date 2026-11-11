@@ -89,3 +89,11 @@ stop
 start $D/sc $D/sc/in; k Down; k F5; sleep 2
 [ ! -e $D/sc/in/in ] || { echo "ECHEC dossier copié dans lui-même"; exit 1; }
 stop; echo "OK tar forgés et copie dans soi-même"
+
+# 6. mise à jour : une version plus récente publiée apparaît dans le titre, pas une version égale ni un texte invalide
+V=$(./s3bopus --version | sed 's/S3bopus \([0-9.]*\).*/\1/')
+upd() { printf '%s\n' "$1" > $D/version.txt; S3BOPUS_UPDATE_URL=file://$D/version.txt start $D/s1 $D/s2; sleep 1; TITLE=$(xdotool getwindowname $W); stop; }
+upd "linux=99.0.0"; echo "$TITLE" | grep -q "99.0.0" || { echo "ECHEC mise à jour non signalée : $TITLE"; exit 1; }
+upd "linux=$V"; [ "$TITLE" = "S3bopus $V" ] || { echo "ECHEC même version signalée : $TITLE"; exit 1; }
+upd 'linux=99.0.0; rm -rf x'; [ "$TITLE" = "S3bopus $V" ] || { echo "ECHEC texte invalide accepté : $TITLE"; exit 1; }
+echo "OK vérification de mise à jour"

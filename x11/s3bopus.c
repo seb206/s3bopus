@@ -27,7 +27,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
-#define VERSION "1.0.2"
+#define VERSION "1.0.3"
 #define MAXTABS 8
 #define MAXJOBS 512
 
@@ -69,6 +69,7 @@ static void say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static Pane P[2];
 static int active, show_hidden;
 static int ROWSEL = 1;  // 1 : la sélection prend la ligne entière, 0 : seulement le nom du fichier
+static int UPDATE = 1;  // 1 : au démarrage, lit la version publiée sur le site (update=0 dans le fichier de réglages pour l'éviter)
 static pthread_mutex_t pm = PTHREAD_MUTEX_INITIALIZER;
 static volatile int dirty = 1, refresh_req;
 
@@ -586,11 +587,40 @@ static void set_theme(void) {
 // Préférences (langue, thème) dans ~/.config/s3bopus.conf
 static char PREVFM[128];  // gestionnaire de dossiers d'avant S3bopus, pour le restaurer
 static void conf_path(char *b, size_t n) { const char *h = getenv("HOME"); snprintf(b, n, "%s/.config/s3bopus.conf", h ? h : "/tmp"); }
-static void conf_save(void) { char b[PATH_MAX]; conf_path(b, sizeof b); FILE *f = fopen(b, "w"); if (f) { fprintf(f, "lang=%s\ntheme=%s\nrowsel=%d\nfm=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark", ROWSEL, PREVFM); fclose(f); } }
+static void conf_save(void) { char b[PATH_MAX]; conf_path(b, sizeof b); FILE *f = fopen(b, "w"); if (f) { fprintf(f, "lang=%s\ntheme=%s\nrowsel=%d\nupdate=%d\nfm=%s\n", EN ? "en" : "fr", LIGHT ? "light" : "dark", ROWSEL, UPDATE, PREVFM); fclose(f); } }
 static void conf_load(void) {
     char b[PATH_MAX], l[160]; conf_path(b, sizeof b); FILE *f = fopen(b, "r"); if (!f) return;
-    while (fgets(l, sizeof l, f)) { if (!strncmp(l, "lang=en", 7)) EN = 1; else if (!strncmp(l, "lang=fr", 7)) EN = 0; else if (!strncmp(l, "theme=light", 11)) LIGHT = 1; else if (!strncmp(l, "theme=dark", 10)) LIGHT = 0; else if (!strncmp(l, "rowsel=", 7)) ROWSEL = l[7] != '0'; else if (!strncmp(l, "fm=", 3)) { snprintf(PREVFM, sizeof PREVFM, "%s", l + 3); PREVFM[strcspn(PREVFM, "\r\n")] = 0; } }
+    while (fgets(l, sizeof l, f)) { if (!strncmp(l, "lang=en", 7)) EN = 1; else if (!strncmp(l, "lang=fr", 7)) EN = 0; else if (!strncmp(l, "theme=light", 11)) LIGHT = 1; else if (!strncmp(l, "theme=dark", 10)) LIGHT = 0; else if (!strncmp(l, "rowsel=", 7)) ROWSEL = l[7] != '0'; else if (!strncmp(l, "update=", 7)) UPDATE = l[7] != '0'; else if (!strncmp(l, "fm=", 3)) { snprintf(PREVFM, sizeof PREVFM, "%s", l + 3); PREVFM[strcspn(PREVFM, "\r\n")] = 0; } }
     fclose(f);
+}
+
+// Mise à jour : le site publie version.txt (« linux=1.0.2 ») ; lu avec curl dans un fil à part, rien n'est téléchargé ni installé
+static char NEWVER[16]; static volatile int newver_ready;
+// « a.b.c » en nombre comparable ; -1 si ce n'est pas trois nombres (pas de sscanf / atol : ils tirent glibc 2.38)
+static long ver_num(const char *s) {
+    long v = 0, part = 0; int parts = 1;
+    if (!*s) return -1;
+    for (; *s; s++) {
+        if (*s == '.') { v = v * 1000 + part; part = 0; parts++; }
+        else if (*s >= '0' && *s <= '9') part = part * 10 + (*s - '0');
+        else return -1;
+        if (part > 999) return -1;
+    }
+    return parts == 3 ? v * 1000 + part : -1;
+}
+static void *update_thread(void *arg) {
+    (void)arg;
+    // S3BOPUS_UPDATE_URL : pour les essais ; développée par le shell entre guillemets, donc sans risque d'injection
+    FILE *f = popen("curl -fsS -m 5 \"${S3BOPUS_UPDATE_URL:-https://s3btify.com/s3bopus/version.txt}\" 2>/dev/null", "r");
+    if (!f) return NULL;
+    char l[64];
+    while (fgets(l, sizeof l, f))
+        if (!strncmp(l, "linux=", 6)) {
+            l[strcspn(l, "\r\n")] = 0;
+            if (ver_num(l + 6) > ver_num(VERSION)) { snprintf(NEWVER, sizeof NEWVER, "%s", l + 6); newver_ready = 1; }
+        }
+    pclose(f);
+    return NULL;
 }
 
 // Gestionnaire de dossiers par défaut (xdg-mime), réversible
@@ -1124,6 +1154,7 @@ int main(int argc, char **argv) {
     }
     { char tmp[PATH_MAX]; Job tj = {0}; snprintf(tmp, sizeof tmp, "/tmp/S3bopus-%d", (int)getuid()); rm_tree(&tj, tmp); }
     pthread_t th; pthread_create(&th, NULL, worker, NULL); pthread_detach(th);
+    if (UPDATE) { pthread_t ut; pthread_create(&ut, NULL, update_thread, NULL); pthread_detach(ut); }
 
     int xfd = ConnectionNumber(dpy);
     for (;;) {
@@ -1145,6 +1176,11 @@ int main(int argc, char **argv) {
             for (int p = 0; p < 2; p++) { Pane *pp = &P[p]; char keep[256] = ""; Tab *t = &pp->tabs[pp->atab];
                 pthread_mutex_lock(&pm); if (t->cur < pp->n) snprintf(keep, 256, "%s", pp->e[t->cur].name); pthread_mutex_unlock(&pm);
                 load_pane(p, keep[0] ? keep : NULL); }
+        }
+        if (newver_ready) {  // reste dans le titre de la fenêtre ; le message du bas s'efface après quelques secondes
+            newver_ready = 0;
+            char tt[160]; snprintf(tt, sizeof tt, T("S3bopus " VERSION " — version %s disponible : s3btify.com/s3bopus", "S3bopus " VERSION " — version %s available: s3btify.com/s3bopus"), NEWVER);
+            XStoreName(dpy, win, tt); say("%s", tt);
         }
         if (msg_until && msg_until < now()) { msg_until = 0; dirty = 1; }
         pthread_mutex_lock(&qm); for (int i = 0; i < nj; i++) if (J[i].state == Q_RUN) dirty = 1; pthread_mutex_unlock(&qm);

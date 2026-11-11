@@ -14,6 +14,8 @@ namespace S3bopus
     internal sealed class AddressBar : Control
     {
         public const string ThisPC = "::PC";
+        /// <summary>Explorateur réseau : les machines du réseau local qui partagent des fichiers.</summary>
+        public const string Network = "::NET";
 
         readonly ToolStrip _crumbs, _history;
         readonly TextBox _edit;
@@ -125,7 +127,7 @@ namespace S3bopus
         {
             if (_editing) return;
             _editing = true;
-            _edit.Text = _path == ThisPC ? "" : _path;
+            _edit.Text = _path == ThisPC || _path == Network ? "" : _path;
             _crumbs.Visible = false;
             _edit.Visible = true;
             _edit.Focus();
@@ -164,7 +166,7 @@ namespace S3bopus
         static List<string> Segments(string path)
         {
             var list = new List<string>();
-            if (path == ThisPC || string.IsNullOrEmpty(path)) return list;
+            if (path == ThisPC || path == Network || string.IsNullOrEmpty(path)) return list;
             string p = path;
             while (!string.IsNullOrEmpty(p))
             {
@@ -188,6 +190,8 @@ namespace S3bopus
             pc.DropDownOpening += (s, e) => FillRoots(pc);
             pc.DropDownItems.Add("…");
             _crumbs.Items.Add(pc);
+            if (_path == Network || _path.StartsWith(@"\\"))
+                _crumbs.Items.Add(new ToolStripButton(Lang.T("Réseau", "Network"), null, (s, e) => NavigateRequested?.Invoke(Network)));
 
             foreach (var seg in Segments(_path))
             {

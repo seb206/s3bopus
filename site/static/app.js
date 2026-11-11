@@ -16,7 +16,7 @@
     h4: "Light or dark, FR or EN", c4: "Two buttons at the top right. Paste text or an image from the clipboard: it creates a .txt or a .jpg.",
     win_req: "Windows 10 / 11. Nothing to install: unzip and run. All archives (ZIP, 7z, RAR, tar.gz).",
     dl_win: "Download for Windows", win_note: "Windows may show a SmartScreen warning: the program is not signed.",
-    light: "light", winl_req: "The same program in 159 KB: only ZIP archives open in the pane.", dl_winl: "Download the light version",
+    light: "light", winl_req: "The same program in 172 KB: only ZIP archives open in the pane.", dl_winl: "Download the light version",
     deb_req: "Debian 12 / Ubuntu 22.04 or later, 64-bit. Native X11: 33 KB, it only uses libX11 and libXft.", dl_deb: "Download the .deb package",
     bin_req: "64-bit Linux, any distribution with an X11 server or XWayland. A single 4 MB executable, no installation, no dependencies.", dl_bin: "Download the executable",
     rpm_req: "Fedora / RHEL / openSUSE, 64-bit. Native X11, 39 KB.", dl_rpm: "Download the .rpm package",

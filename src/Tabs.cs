@@ -86,6 +86,7 @@ namespace S3bopus
         public static string Title(FilePane p)
         {
             if (p.CurrentPath == null) return "…";
+            if (p.CurrentPath == AddressBar.Network) return Lang.T("Réseau", "Network");
             if (p.IsThisPC) return Lang.T("Ce PC", "This PC");
             string name = Path.GetFileName(p.CurrentPath);
             return string.IsNullOrEmpty(name) ? p.CurrentPath : name;
@@ -102,7 +103,7 @@ namespace S3bopus
                 var b = new ToolStripButton(Title(p))
                 {
                     Checked = p == Current,
-                    ToolTipText = p.CurrentPath == AddressBar.ThisPC ? Title(p) : p.CurrentPath,
+                    ToolTipText = p.IsThisPC ? Title(p) : p.CurrentPath,
                     Padding = new Padding(Ui.S(6), 0, Ui.S(6), 0),
                     AutoToolTip = false
                 };
