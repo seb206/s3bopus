@@ -31,14 +31,41 @@ final class PaneTable: NSTableView {
         band(from: p, event: event)
     }
 
+    /// Colonne du nom (les colonnes peuvent être réordonnées).
+    var nameCol: Int { column(withIdentifier: NSUserInterfaceItemIdentifier("name")) }
+
+    /// Abscisse de la fin de l'icône + nom d'une ligne (nil si la cellule n'est pas affichée).
+    private func nameEnd(row r: Int) -> CGFloat? {
+        let nc = nameCol
+        guard nc >= 0, let cell = view(atColumn: nc, row: r, makeIfNecessary: false) as? NameCell, let tf = cell.textField else { return nil }
+        let col = rect(ofColumn: nc)
+        return min(col.minX + 2 + 16 + 4 + tf.attributedStringValue.size().width + 8, col.maxX)
+    }
+
     /// Vrai si le point est sur l'icône ou le texte du nom.
     private func overName(_ p: NSPoint) -> Bool {
         let r = row(at: p)
-        guard r >= 0, column(at: p) == 0, let cell = view(atColumn: 0, row: r, makeIfNecessary: false) as? NameCell, let tf = cell.textField else { return false }
-        let col = rect(ofColumn: 0)
-        let end = col.minX + 2 + 16 + 4 + tf.attributedStringValue.size().width + 8
-        return p.x <= min(end, col.maxX)
+        guard r >= 0, column(at: p) == nameCol, let end = nameEnd(row: r) else { return false }
+        return p.x <= end
     }
+
+    /// Curseur (élément actif) : ce n'est pas une sélection, simple contour comme dans Directory Opus.
+    var cursorRow = -1 { didSet { if cursorRow != oldValue { needsDisplay = true } } }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard cursorRow >= 0, cursorRow < numberOfRows, !selectedRowIndexes.contains(cursorRow), window?.firstResponder === self else { return }
+        var r = rect(ofRow: cursorRow)
+        if !PaneTable.rowSelect, let end = nameEnd(row: cursorRow) {
+            let x0 = rect(ofColumn: nameCol).minX
+            r = NSRect(x: x0, y: r.minY, width: max(0, end - x0), height: r.height)
+        }
+        NSColor.controlAccentColor.withAlphaComponent(0.8).setStroke()
+        let path = NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5))
+        path.lineWidth = 1
+        path.stroke()
+    }
+    override func resignFirstResponder() -> Bool { needsDisplay = true; return super.resignFirstResponder() }
 
     private func band(from start: NSPoint, event: NSEvent) {
         let base = event.modifierFlags.contains(.command) ? selectedRowIndexes : IndexSet()
@@ -67,9 +94,8 @@ final class PaneTable: NSTableView {
             var sel = base
             for r in rows(in: rect).location..<(rows(in: rect).location + rows(in: rect).length) where r >= 0 && r < numberOfRows {
                 if !PaneTable.rowSelect {
-                    guard let cell = view(atColumn: 0, row: r, makeIfNecessary: false) as? NameCell, let tf = cell.textField else { continue }
-                    let col = rect_(ofColumn: 0)
-                    if rect.maxX < col.minX || rect.minX > col.minX + 2 + 16 + 4 + tf.attributedStringValue.size().width + 8 { continue }
+                    guard let end = nameEnd(row: r) else { continue }
+                    if rect.maxX < rect_(ofColumn: nameCol).minX || rect.minX > end { continue }
                 }
                 sel.insert(r)
             }
@@ -77,7 +103,7 @@ final class PaneTable: NSTableView {
         }
     }
     private func rect_(ofColumn c: Int) -> NSRect { rect(ofColumn: c) }
-    override func becomeFirstResponder() -> Bool { pane?.activate(); return super.becomeFirstResponder() }
+    override func becomeFirstResponder() -> Bool { pane?.activate(); needsDisplay = true; return super.becomeFirstResponder() }
     override func otherMouseDown(with event: NSEvent) { pane?.otherMouse(event) }
     override func menu(for event: NSEvent) -> NSMenu? {
         let row = self.row(at: convert(event.locationInWindow, from: nil))
@@ -137,6 +163,8 @@ final class TextCell: NSTableCellView {
 final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate, NSSearchFieldDelegate, NSComboBoxDelegate, NSMenuDelegate {
     static var showHidden = true
     static var autoSizes = true
+    /// Favoris automatiques : vrai une fois les onglets rouverts au démarrage.
+    static var tracking = false
     private static var cutToken: Int?
 
     weak var host: PaneHost?
@@ -209,7 +237,7 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
         table.style = .fullWidth
         table.usesAlternatingRowBackgroundColors = true
         table.allowsMultipleSelection = true
-        table.allowsColumnReordering = false
+        table.allowsColumnReordering = true
         table.rowHeight = 20
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         table.autosaveName = "S3bopusPane"
@@ -313,15 +341,21 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
         if record, !previous.isEmpty, p != previous { back.append(previous); forward.removeAll() }
         currentPath = p
         addressBox.stringValue = p
+        if FilePane.tracking, p != previous { Favorites.visit(p) }
         sizeToken?.cancelled = true
         filterText = ""; filterField.stringValue = ""; filterField.isHidden = true
         watch(p)
-        load(p, select: select, revertTo: previous.isEmpty ? nil : previous)
+        load(p, select: select, revertTo: previous.isEmpty ? nil : previous, cursorOnly: true)
         onPathChanged?()
         updateNavButtons()
     }
 
-    func reload() { load(currentPath, select: selectedItems.map { $0.name }, revertTo: nil) }
+    func reload() {
+        let sel = selectedItems.map { $0.name }
+        let c = table.cursorRow
+        if !sel.isEmpty { load(currentPath, select: sel, revertTo: nil) }
+        else { load(currentPath, select: c >= 0 && c < shown.count ? [shown[c].name] : [], revertTo: nil, cursorOnly: true) }
+    }
 
     private func updateNavButtons() {
         // (les boutons restent actifs : l'action ignore simplement un historique vide)
@@ -366,7 +400,7 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
 
     // ======================================================================= chargement
 
-    private func load(_ path: String, select names: [String], revertTo: String?) {
+    private func load(_ path: String, select names: [String], revertTo: String?, cursorOnly: Bool = false) {
         generation += 1
         let gen = generation
         DispatchQueue.global(qos: .userInitiated).async {
@@ -380,7 +414,7 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
                     return
                 }
                 self.items = list
-                self.refilter(select: names)
+                self.refilter(select: names, cursorOnly: cursorOnly)
                 if FilePane.autoSizes { self.computeSizes(force: false) }
             }
         }
@@ -419,17 +453,32 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
         }
     }
 
-    func refilter(select names: [String]) {
+    /// Les noms sont sélectionnés, ou seulement désignés par le curseur (`cursorOnly`) : rien n'est sélectionné d'office.
+    func refilter(select names: [String], cursorOnly: Bool = false) {
         shown = sorted(items.filter(visible))
         table.reloadData()
         var idx = IndexSet()
+        var cursor: Int?
         if let p = pendingRename, let i = shown.firstIndex(where: { $0.name == p }) { idx.insert(i) }
+        else if cursorOnly { cursor = shown.firstIndex { names.contains($0.name) } }
         else { for (i, it) in shown.enumerated() where names.contains(it.name) { idx.insert(i) } }
-        if idx.isEmpty, let k = selectAfterIndex, !shown.isEmpty { idx.insert(min(k, shown.count - 1)) }
+        if idx.isEmpty, cursor == nil, let k = selectAfterIndex, !shown.isEmpty { cursor = min(k, shown.count - 1) }
         selectAfterIndex = nil
-        if !idx.isEmpty { table.selectRowIndexes(idx, byExtendingSelection: false); table.scrollRowToVisible(idx.first!) }
+        if !idx.isEmpty { table.selectRowIndexes(idx, byExtendingSelection: false); table.scrollRowToVisible(idx.first!); table.cursorRow = idx.first! }
+        else {
+            table.cursorRow = shown.isEmpty ? -1 : (cursor ?? 0)
+            if table.cursorRow >= 0 && cursor != nil { table.scrollRowToVisible(table.cursorRow) }
+        }
         updateStatus()
         if pendingRename != nil { pendingRename = nil; DispatchQueue.main.async { [weak self] in self?.beginRename() } }
+    }
+
+    /// Refiltre en gardant la sélection, ou à défaut l'élément sous le curseur.
+    private func refilterKeeping() {
+        let sel = selectedItems.map { $0.name }
+        if !sel.isEmpty { refilter(select: sel); return }
+        let c = table.cursorRow
+        refilter(select: c >= 0 && c < shown.count ? [shown[c].name] : [], cursorOnly: true)
     }
 
     func refreshSizesDisplay() {
@@ -474,7 +523,7 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
 
     private func sizeProgress(_ path: String, complete: Bool, last: Bool, token: CancelToken) {
         guard !token.cancelled else { return }
-        if complete && last && sortKey == "size" { refilter(select: selectedItems.map { $0.name }); return }
+        if complete && last && sortKey == "size" { refilterKeeping(); return }
         if let i = shown.firstIndex(where: { $0.path == path }) {
             table.reloadData(forRowIndexes: [i], columnIndexes: [1])
         }
@@ -512,10 +561,13 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
     func tableView(_ tv: NSTableView, sortDescriptorsDidChange old: [NSSortDescriptor]) {
         guard let d = tv.sortDescriptors.first, let k = d.key else { return }
         sortKey = k; sortAscending = d.ascending
-        refilter(select: selectedItems.map { $0.name })
+        refilterKeeping()
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) { updateStatus() }
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        if let last = table.selectedRowIndexes.last { table.cursorRow = last }
+        updateStatus()
+    }
 
     func tableView(_ tv: NSTableView, typeSelectStringFor column: NSTableColumn?, row: Int) -> String? { shown[row].name }
 
@@ -529,10 +581,28 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
         if it.isDir { navigate(it.path) } else { Sys.open(it.path) }
     }
 
-    func openSelected() { if let it = selectedItems.first { selectedItems.count == 1 ? open(it) : selectedItems.filter { !$0.isDir }.forEach { open($0) } } }
+    func openSelected() {
+        // Rien de sélectionné : Entrée ouvre l'élément sous le curseur
+        if selectedItems.isEmpty, table.cursorRow >= 0, table.cursorRow < shown.count { open(shown[table.cursorRow]); return }
+        if let it = selectedItems.first { selectedItems.count == 1 ? open(it) : selectedItems.filter { !$0.isDir }.forEach { open($0) } }
+    }
 
     func handleKey(_ e: NSEvent) -> Bool {
         let m = e.modifierFlags.intersection([.command, .shift, .option, .control])
+        // Flèches seules : le curseur se déplace sans sélectionner (Maj étend la sélection, ⌘ reste natif)
+        if m.isEmpty, !shown.isEmpty {
+            let cur = table.cursorRow < 0 ? 0 : table.cursorRow
+            let page = max(1, table.rows(in: table.visibleRect).length - 1)
+            switch e.keyCode {
+            case 125: moveCursor(to: table.cursorRow < 0 ? 0 : cur + 1); return true
+            case 126: moveCursor(to: cur - 1); return true
+            case 121: moveCursor(to: cur + page); return true
+            case 116: moveCursor(to: cur - page); return true
+            case 115: moveCursor(to: 0); return true
+            case 119: moveCursor(to: shown.count - 1); return true
+            default: break
+            }
+        }
         switch e.keyCode {
         case 36, 76: if m.isEmpty { openSelected(); return true }
         case 51: if m.isEmpty { goUp(); return true }
@@ -551,6 +621,13 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
         default: break
         }
         return false
+    }
+
+    private func moveCursor(to r: Int) {
+        let i = max(0, min(shown.count - 1, r))
+        table.cursorRow = i
+        table.deselectAll(nil)
+        table.scrollRowToVisible(i)
     }
 
     func otherMouse(_ e: NSEvent) {
@@ -576,10 +653,11 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
     }
 
     func beginRename() {
-        guard let row = table.selectedRowIndexes.first, row < shown.count,
-              let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NameCell, let tf = cell.textField else { return }
+        let cur = table.cursorRow >= 0 ? table.cursorRow : nil
+        guard let row = table.selectedRowIndexes.first ?? cur, row < shown.count, table.nameCol >= 0,
+              let cell = table.view(atColumn: table.nameCol, row: row, makeIfNecessary: true) as? NameCell, let tf = cell.textField else { return }
         tf.isEditable = true
-        table.editColumn(0, row: row, with: nil, select: true)
+        table.editColumn(table.nameCol, row: row, with: nil, select: true)
         if let ed = tf.currentEditor() {
             let n = shown[row].name as NSString
             ed.selectedRange = NSRange(location: 0, length: shown[row].isDir ? n.length : (n.deletingPathExtension as NSString).length)
@@ -597,14 +675,14 @@ final class FilePane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSText
     func controlTextDidChange(_ obj: Notification) {
         guard (obj.object as AnyObject) === filterField else { return }
         filterText = filterField.stringValue
-        refilter(select: selectedItems.map { $0.name })
+        refilterKeeping()
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
         guard control === filterField else { return false }
         if sel == #selector(NSResponder.cancelOperation(_:)) {
             filterField.stringValue = ""; filterText = ""; filterField.isHidden = true
-            refilter(select: selectedItems.map { $0.name })
+            refilterKeeping()
             focusList(); return true
         }
         if sel == #selector(NSResponder.insertNewline(_:)) || sel == #selector(NSResponder.insertTab(_:)) { focusList(); return true }

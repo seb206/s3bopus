@@ -31,7 +31,7 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
     private var timer: Timer?
     private var queueHeight: CGFloat = 200
 
-    var rowSelectItem: NSMenuItem?, showHiddenItem: NSMenuItem?, autoSizesItem: NSMenuItem?, queueItem: NSMenuItem?, fkeysItem: NSMenuItem?
+    var linkItem: NSMenuItem?, updateItem: NSMenuItem?, rowSelectItem: NSMenuItem?, showHiddenItem: NSMenuItem?, autoSizesItem: NSMenuItem?, queueItem: NSMenuItem?, fkeysItem: NSMenuItem?
 
     override init() {
         FilePane.showHidden = Settings.bool("ShowHidden", true)
@@ -44,6 +44,7 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
             let p = FilePane()
             p.host = hostRef
             let model = (side == "Left" ? leftRef : rightRef)?.current
+            p.table.autosaveName = "S3bopusPane" + side // largeurs et ordre des colonnes, par panneau
             p.setSort(key: model?.sortKey ?? Settings.string(side + "Sort") ?? "name", ascending: model?.sortAscending ?? Settings.bool(side + "Asc", true))
             return p
         }
@@ -56,6 +57,7 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
         hostRef = self
 
         window.title = "S3bopus"
+        window.alphaValue = CGFloat(max(30, min(100, Settings.int("Opacity", 100)))) / 100
         window.minSize = NSSize(width: 640, height: 400)
         window.delegate = self
         window.setFrameAutosaveName("S3bopusMain")
@@ -101,6 +103,11 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
         showQueue(Settings.bool("QueueVisible", true))
         leftTabs.current.activate()
         leftTabs.current.focusList()
+        FilePane.tracking = true // les onglets rouverts au démarrage ne comptent pas comme des ouvertures
+        UpdateCheck.checkAtStartup()
+        S3btifyLink.shared.onChange = { [weak self] in self?.updateLink() }
+        S3btifyLink.shared.start()
+        updateLink()
     }
 
     // ======================================================================= construction
@@ -124,7 +131,9 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
             cmd("arrow.left.arrow.right", "", Lang.T("Échanger les panneaux (⌘U)", "Swap panes (⌘U)"), #selector(swapPanes)),
             cmd("equal", "", Lang.T("Même dossier dans l'autre panneau (⌘=)", "Same folder in the other pane (⌘=)"), #selector(syncOther)),
             cmd("terminal", "", Lang.T("Ouvrir un terminal ici", "Open a terminal here"), #selector(openTerminal)),
-            cmd("folder", "", Lang.T("Afficher dans le Finder", "Show in Finder"), #selector(revealFolder))
+            cmd("folder", "", Lang.T("Afficher dans le Finder", "Show in Finder"), #selector(revealFolder)),
+            cmd("clock.arrow.circlepath", "", Lang.T("Favoris automatiques : les 10 dossiers les plus ouverts", "Smart favorites: the 10 most opened folders"), #selector(showSmartFavorites(_:))),
+            cmd("star", "", Lang.T("Favoris", "Favorites"), #selector(showFavorites(_:)))
         ]
         let left = NSStackView(views: views)
         left.spacing = 4
@@ -136,9 +145,26 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
         let right = NSStackView(views: [lang, themeButton])
         right.spacing = 4
 
+        // Lien S3btify : boutons précédent / lecture / suivant (visibles si S3btify répond) et bandeau qui prend la place restante
+        linkPrev = cmd("backward.fill", "", Lang.T("S3btify : morceau précédent", "S3btify: previous track"), #selector(linkPrevious))
+        linkPlay = cmd("playpause.fill", "", Lang.T("S3btify : lecture / pause", "S3btify: play / pause"), #selector(linkPlayPause))
+        linkNext = cmd("forward.fill", "", Lang.T("S3btify : morceau suivant", "S3btify: next track"), #selector(linkNextTrack))
+        let linkButtons = NSStackView(views: [linkPrev, linkPlay, linkNext])
+        linkButtons.spacing = 2
+        linkLabel.font = .systemFont(ofSize: 11)
+        linkLabel.textColor = .secondaryLabelColor
+        linkLabel.lineBreakMode = .byTruncatingTail
+        linkLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        linkLabel.setContentHuggingPriority(.init(1), for: .horizontal)
+        let middle = NSStackView(views: [linkButtons, linkLabel])
+        middle.spacing = 6
+        middle.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+
         let bar = NSView()
-        for v in [left, right] { v.translatesAutoresizingMaskIntoConstraints = false; bar.addSubview(v) }
+        for v in [left, middle, right] { v.translatesAutoresizingMaskIntoConstraints = false; bar.addSubview(v) }
         NSLayoutConstraint.activate([
+            middle.leadingAnchor.constraint(equalTo: left.trailingAnchor, constant: 12), middle.trailingAnchor.constraint(lessThanOrEqualTo: right.leadingAnchor, constant: -8),
+            middle.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             bar.heightAnchor.constraint(equalToConstant: 34),
             left.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8), left.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             right.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8), right.centerYAnchor.constraint(equalTo: bar.centerYAnchor)
@@ -147,6 +173,75 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
     }
 
     private var themeButton: NSButton!
+    private var linkPrev: NSButton!, linkPlay: NSButton!, linkNext: NSButton!
+    private let linkLabel = NSTextField(labelWithString: "")
+
+    private var linkOn: Bool { Settings.bool("S3btify", true) }
+    private func updateLink() {
+        let link = S3btifyLink.shared
+        let show = linkOn && link.available
+        for b in [linkPrev, linkPlay, linkNext] { b?.isHidden = !show }
+        linkPlay?.image = NSImage(systemSymbolName: link.playing ? "pause.fill" : "play.fill", accessibilityDescription: nil)
+        linkLabel.isHidden = !linkOn
+        linkLabel.stringValue = link.text
+        linkLabel.toolTip = link.text.replacingOccurrences(of: "   ·   ", with: "\n")
+        linkLabel.textColor = link.available ? .labelColor : .secondaryLabelColor
+    }
+    @objc func linkPrevious() { S3btifyLink.shared.send("prev") }
+    @objc func linkPlayPause() { S3btifyLink.shared.send("playpause") }
+    @objc func linkNextTrack() { S3btifyLink.shared.send("next") }
+    @objc func toggleLink() {
+        Settings.set("S3btify", !linkOn)
+        linkItem?.state = linkOn ? .on : .off
+        updateLink()
+    }
+    @objc func toggleUpdateCheck() {
+        Settings.set("UpdateCheck", !Settings.bool("UpdateCheck", true))
+        updateItem?.state = Settings.bool("UpdateCheck", true) ? .on : .off
+    }
+    @objc func setOpacity(_ s: NSMenuItem) {
+        Settings.set("Opacity", s.tag)
+        window.alphaValue = CGFloat(s.tag) / 100
+        s.menu?.items.forEach { $0.state = $0.tag == s.tag ? .on : .off }
+    }
+
+    // Favoris : menus déroulants sous les boutons de la barre
+    private func popUp(_ menu: NSMenu, from sender: Any?) {
+        guard let b = sender as? NSView else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: b.bounds.height + 2), in: b)
+    }
+    private func goItem(_ path: String, _ hint: String? = nil) -> NSMenuItem {
+        let mi = NSMenuItem(title: hint.map { path + "    " + $0 } ?? path, action: #selector(goHome(_:)), keyEquivalent: "")
+        mi.target = self; mi.representedObject = path
+        return mi
+    }
+    @objc func showSmartFavorites(_ sender: Any?) {
+        let m = NSMenu()
+        let top = Favorites.top(10)
+        if top.isEmpty { let e = NSMenuItem(title: Lang.T("(aucun dossier pour l'instant)", "(no folders yet)"), action: nil, keyEquivalent: ""); e.isEnabled = false; m.addItem(e) }
+        for t in top { m.addItem(goItem(t.path, "\(t.count) ×")) }
+        if !top.isEmpty {
+            m.addItem(.separator())
+            let c = NSMenuItem(title: Lang.T("Effacer les favoris automatiques", "Clear smart favorites"), action: #selector(clearSmartFavorites), keyEquivalent: "")
+            c.target = self; m.addItem(c)
+        }
+        popUp(m, from: sender)
+    }
+    @objc func clearSmartFavorites() { Favorites.clearSmart() }
+    @objc func showFavorites(_ sender: Any?) {
+        let m = NSMenu()
+        let cur = active.currentPath
+        let isFav = Favorites.isManual(cur)
+        let t = NSMenuItem(title: isFav ? Lang.T("Retirer ce dossier des favoris", "Remove this folder from favorites") : Lang.T("Ajouter ce dossier aux favoris", "Add this folder to favorites"),
+                           action: #selector(toggleFavorite), keyEquivalent: "")
+        t.target = self; t.isEnabled = !cur.isEmpty
+        m.addItem(t)
+        let list = Favorites.manual
+        if !list.isEmpty { m.addItem(.separator()) }
+        for p in list { m.addItem(goItem(p)) }
+        popUp(m, from: sender)
+    }
+    @objc func toggleFavorite() { Favorites.toggle(active.currentPath) }
 
     private var isDark: Bool {
         switch Settings.int("Appearance", 0) {
@@ -369,9 +464,25 @@ final class MainController: NSObject, NSWindowDelegate, PaneHost, NSMenuItemVali
     }
 
     @objc func about() {
-        Dialogs.message("S3bopus \(AppInfo.version) — \(AppInfo.date)", Lang.en
-            ? "Lightweight dual-pane file manager (native macOS).\n\nShortcuts:\n  Tab  switch pane\n  F2  rename      F3  folder sizes\n  F5  copy to the other pane      F6  move\n  F7  new folder      F8 / ⌘⌫  trash (⇧: delete permanently)\n  ⌘J  transfer queue      ⇧⌘.  hidden items\n  ⌘L  address bar      ⌘F  filter\n  ⌘U  swap panes      ⌘=  same folder\n  ⌘C / X / V  clipboard (text or image: pasted as a file)\n  ⌘T / ⌘W  new / close tab      ⌃Tab  next tab\n  ⌫  parent folder\n  Middle-click a folder  open it in the other pane"
-            : "Explorateur de fichiers léger à deux panneaux (natif macOS).\n\nRaccourcis :\n  Tab  changer de panneau\n  F2  renommer      F3  taille des dossiers\n  F5  copier vers l'autre panneau      F6  déplacer\n  F7  nouveau dossier      F8 / ⌘⌫  corbeille (⇧ : supprimer définitivement)\n  ⌘J  file de transferts      ⇧⌘.  éléments masqués\n  ⌘L  barre d'adresse      ⌘F  filtrer\n  ⌘U  échanger les panneaux      ⌘=  même dossier\n  ⌘C / X / V  presse-papiers (texte ou image : collé comme fichier)\n  ⌘T / ⌘W  nouvel onglet / fermer      ⌃Tab  onglet suivant\n  ⌫  dossier parent\n  Clic molette sur un dossier  l'ouvrir dans l'autre panneau")
+        let shortcuts = Lang.en
+            ? "Lightweight dual-pane file manager (native macOS).\n\nShortcuts:\n  Tab  switch pane\n  F2  rename      F3  folder sizes\n  F5  copy to the other pane      F6  move\n  F7  new folder      F8 / ⌘⌫  trash (⇧: delete permanently)\n  ⌘J  transfer queue      ⇧⌘.  hidden items\n  ⌘L  address bar      ⌘F  filter\n  ⌘U  swap panes      ⌘=  same folder\n  ⌘C / X / V  clipboard (text or image: pasted as a file)\n  ⌘T / ⌘W  new / close tab      ⌃Tab  next tab\n  ⌫  parent folder\n  Arrows  move the cursor (⇧ to select)\n  Middle-click a folder  open it in the other pane"
+            : "Explorateur de fichiers léger à deux panneaux (natif macOS).\n\nRaccourcis :\n  Tab  changer de panneau\n  F2  renommer      F3  taille des dossiers\n  F5  copier vers l'autre panneau      F6  déplacer\n  F7  nouveau dossier      F8 / ⌘⌫  corbeille (⇧ : supprimer définitivement)\n  ⌘J  file de transferts      ⇧⌘.  éléments masqués\n  ⌘L  barre d'adresse      ⌘F  filtrer\n  ⌘U  échanger les panneaux      ⌘=  même dossier\n  ⌘C / X / V  presse-papiers (texte ou image : collé comme fichier)\n  ⌘T / ⌘W  nouvel onglet / fermer      ⌃Tab  onglet suivant\n  ⌫  dossier parent\n  Flèches  déplacer le curseur (⇧ pour sélectionner)\n  Clic molette sur un dossier  l'ouvrir dans l'autre panneau"
+        let a = NSAlert()
+        a.messageText = "S3bopus \(AppInfo.version) — \(AppInfo.date)"
+        a.informativeText = shortcuts
+        let link = "https://www.linkedin.com/in/sebastienseu/"
+        let cfg = NSHomeDirectory() + "/Library/Preferences/com.s3btify.s3bopus.plist"
+        let text = NSMutableAttributedString(string: Lang.T("Développé par Sébastien Seu", "Developed by Sébastien Seu") + "\nContact : ",
+                                             attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.labelColor])
+        text.append(NSAttributedString(string: link, attributes: [.font: NSFont.systemFont(ofSize: 12), .link: URL(string: link)!]))
+        text.append(NSAttributedString(string: "\n" + Lang.T("Réglages : ", "Settings: ") + cfg, attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
+        let tv = NSTextField(labelWithAttributedString: text)
+        tv.allowsEditingTextAttributes = true; tv.isSelectable = true
+        tv.preferredMaxLayoutWidth = 380
+        tv.lineBreakMode = .byWordWrapping
+        tv.frame = NSRect(origin: .zero, size: tv.fittingSize)
+        a.accessoryView = tv
+        a.runModal()
     }
 
     /// Les actions sur les fichiers sont inertes pendant la saisie dans un champ texte.

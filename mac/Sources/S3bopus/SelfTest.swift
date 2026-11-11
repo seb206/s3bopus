@@ -56,6 +56,13 @@ enum SelfTest {
 
         // Formats
         check(Fmt.size(1536) == (Lang.en ? "1.5 KB" : "1,5 Ko"), "format taille (\(Fmt.size(1536)))")
+        // Mises à jour, lien S3btify, favoris
+        check(UpdateCheck.parse("windows=1.0.5\nmac=1.0.7\n", key: "mac") == "1.0.7" && UpdateCheck.parse("mac=abc", key: "mac") == nil, "lecture de version.txt")
+        check(UpdateCheck.isNewer("1.0.10", than: "1.0.9") && !UpdateCheck.isNewer("1.0.5", than: "1.0.5") && !UpdateCheck.isNewer("1.0.4", than: "1.0.5"), "comparaison de versions")
+        check(S3btifyLink.supported("0.15.30A") && S3btifyLink.supported("0.15.31") && !S3btifyLink.supported("0.15.30") && !S3btifyLink.supported("x"), "version S3btify minimale")
+        Favorites.clearSmart(); Favorites.visit("/a"); Favorites.visit("/b"); Favorites.visit("/b")
+        check(Favorites.top(2).map { $0.path } == ["/b", "/a"] && Favorites.top(2)[0].count == 2, "favoris automatiques")
+        Favorites.clearSmart()
         print(failures == 0 ? "TOUS LES TESTS PASSENT" : "\(failures) ÉCHEC(S)")
         return failures == 0 ? 0 : 1
     }

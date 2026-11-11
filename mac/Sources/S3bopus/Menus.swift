@@ -77,7 +77,8 @@ enum MenuBuilder {
             (Lang.T("Bureau", "Desktop"), NSHomeDirectory() + "/Desktop", "d", [.command, .shift]),
             (Lang.T("Documents", "Documents"), NSHomeDirectory() + "/Documents", "o", [.command, .shift]),
             (Lang.T("Téléchargements", "Downloads"), NSHomeDirectory() + "/Downloads", "l", [.command, .option]),
-            (Lang.T("Applications", "Applications"), "/Applications", "a", [.command, .shift])
+            (Lang.T("Applications", "Applications"), "/Applications", "a", [.command, .shift]),
+            (Lang.T("Volumes (disques, partages réseau)", "Volumes (Disks, Network Shares)"), "/Volumes", "v", [.command, .shift])
         ]
         for (t, p, k, m) in places { add(go, t, #selector(MainController.goHome(_:)), k, m).representedObject = p }
         go.addItem(.separator())
@@ -95,6 +96,10 @@ enum MenuBuilder {
         c.queueItem = add(view, Lang.T("File de transferts", "Transfer Queue"), #selector(MainController.toggleQueue), "j")
         c.fkeysItem = add(view, Lang.T("Barre des touches de fonction", "Function Key Bar"), #selector(MainController.toggleFKeys))
         c.fkeysItem?.state = Settings.bool("FKeys", true) ? .on : .off
+        c.linkItem = add(view, Lang.T("Afficher et contrôler S3btify (en ligne, morceau, suivants)", "Show and Control S3btify (online, track, next)"), #selector(MainController.toggleLink))
+        c.linkItem?.state = Settings.bool("S3btify", true) ? .on : .off
+        c.updateItem = add(view, Lang.T("Vérifier les mises à jour au démarrage", "Check for Updates at Startup"), #selector(MainController.toggleUpdateCheck))
+        c.updateItem?.state = Settings.bool("UpdateCheck", true) ? .on : .off
         add(view, Lang.T("Actualiser", "Refresh"), #selector(MainController.reload), "r")
         view.addItem(.separator())
         let app2 = NSMenuItem(title: Lang.T("Apparence", "Appearance"), action: nil, keyEquivalent: ""); view.addItem(app2)
@@ -102,6 +107,12 @@ enum MenuBuilder {
         for (i, t) in [Lang.T("Système", "System"), Lang.T("Clair", "Light"), Lang.T("Sombre", "Dark")].enumerated() {
             let mi = add(am, t, #selector(MainController.setAppearance(_:)), "", [])
             mi.tag = i; mi.state = Settings.int("Appearance", 0) == i ? .on : .off
+        }
+        let op = NSMenuItem(title: Lang.T("Transparence de la fenêtre", "Window Transparency"), action: nil, keyEquivalent: ""); view.addItem(op)
+        let om = NSMenu(); op.submenu = om
+        for pct in [100, 90, 80, 70, 60, 50, 40] {
+            let mi = add(om, pct == 100 ? Lang.T("Aucune (opaque)", "None (opaque)") : "\(100 - pct) %", #selector(MainController.setOpacity(_:)), "", [])
+            mi.tag = pct; mi.state = Settings.int("Opacity", 100) == pct ? .on : .off
         }
         let lang = NSMenuItem(title: Lang.T("Langue", "Language"), action: nil, keyEquivalent: ""); view.addItem(lang)
         let lm = NSMenu(); lang.submenu = lm
