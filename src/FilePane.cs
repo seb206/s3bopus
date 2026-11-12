@@ -41,10 +41,38 @@ namespace S3bopus
         /// <summary>Vrai : la sélection (clic, boîte) prend la ligne entière ; faux : seulement l'icône et le nom.</summary>
         public static bool RowSelect = true;
 
+        /// <summary>Taille de police des listes (points), commune à tous les panneaux ; Ctrl+molette / pincement du pavé tactile.</summary>
+        int _fontSize = 9, _wheelAcc;
+
         public ExplorerListView()
         {
             DoubleBuffered = true;
             ApplyRowSelect();
+            Font = new Font(Ui.Font.FontFamily, _fontSize);
+        }
+
+        /// <summary>Taille de police en points, propre à ce panneau (6 à 32).</summary>
+        public int FontSize
+        {
+            get => _fontSize;
+            set
+            {
+                value = Math.Max(6, Math.Min(32, value));
+                if (value == _fontSize) return;
+                _fontSize = value;
+                var old = Font; Font = new Font(Ui.Font.FontFamily, value); old.Dispose();
+            }
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            if ((ModifierKeys & Keys.Control) == 0) { base.OnMouseWheel(e); return; }
+            // Le pincement d'un pavé tactile arrive comme Ctrl+molette, par petits deltas : on les cumule
+            _wheelAcc += e.Delta;
+            int step = _wheelAcc / 120;
+            if (step == 0) return;
+            _wheelAcc -= step * 120;
+            FontSize += step;
         }
 
         /// <summary>Mode ligne : dessin natif. Mode fichier : dessin maison, la surbrillance s'arrête au nom (le natif remplit toute la colonne).</summary>
@@ -416,10 +444,10 @@ namespace S3bopus
                 AllowDrop = true,
                 BorderStyle = BorderStyle.None,
                 HeaderStyle = ColumnHeaderStyle.Clickable,
-                Font = Ui.Font,
                 BackColor = Ui.Back,
                 ForeColor = Ui.Fore
             };
+            _lv.FontChanged += (s, e) => _headerFont = null;
             _lv.Columns.Add(Lang.T("Nom", "Name"), Ui.S(250));
             _lv.Columns.Add(Lang.T("Modifié le", "Date modified"), Ui.S(120));
             _lv.Columns.Add("Type", Ui.S(130));
@@ -487,6 +515,7 @@ namespace S3bopus
         public void FocusAddress() => _address.BeginEdit();
         public void FocusFilter() { _filter.Focus(); _filter.SelectAll(); }
 
+        public int FontSize { get => _lv.FontSize; set => _lv.FontSize = value; }
         public int SortColumn => _sortCol;
         public bool SortAscending => _sortAsc;
 
@@ -923,7 +952,7 @@ namespace S3bopus
             var en = _view[e.ItemIndex];
             if (en.IsHeader)
             {
-                e.Item = new ListViewItem(new[] { en.Name, "", "", "" }, -1) { ForeColor = Ui.Dark ? Color.FromArgb(90, 170, 255) : Ui.Accent, Font = _headerFont };
+                e.Item = new ListViewItem(new[] { en.Name, "", "", "" }, -1) { ForeColor = Ui.Dark ? Color.FromArgb(90, 170, 255) : Ui.Accent, Font = _headerFont ??= new Font(_lv.Font, FontStyle.Bold) };
                 return;
             }
             if (en.Icon < 0) en.Icon = en.IsDrive ? SysIcons.IconForPath(en.FullPath) : SysIcons.IconFor(en.FullPath, en.IsDir);
@@ -951,7 +980,7 @@ namespace S3bopus
             e.Item = it;
         }
 
-        static readonly Font _headerFont = new Font(Ui.Font, FontStyle.Bold);
+        Font _headerFont;
 
         void Lv_SearchForVirtualItem(object sender, SearchForVirtualItemEventArgs e)
         {

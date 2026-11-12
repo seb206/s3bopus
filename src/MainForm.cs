@@ -203,6 +203,7 @@ namespace S3bopus
                 var model = (side == "Left" ? _leftTabs : _rightTabs)?.Current;
                 p.ColumnWidths = model?.ColumnWidths ?? Settings.Get(side + "Columns");
                 p.ColumnOrder = model?.ColumnOrder ?? Settings.Get(side + "ColumnOrder");
+                p.FontSize = model?.FontSize ?? Settings.GetInt(side + "FontSize", 9);
                 p.SetSort(model?.SortColumn ?? Settings.GetInt(side + "Sort", 0), model?.SortAscending ?? Settings.GetBool(side + "Asc", true));
                 return p;
             }
@@ -647,6 +648,8 @@ namespace S3bopus
                 Settings.Set(side + "Tabs", string.Join("\u001f", tabs.Panes.Select(p => p.CurrentPath)));
                 Settings.Set(side + "Tab", tabs.Panes.ToList().IndexOf(tabs.Current));
             }
+            Settings.Set("LeftFontSize", _left.FontSize);
+            Settings.Set("RightFontSize", _right.FontSize);
             Settings.Set("LeftColumns", _left.ColumnWidths);
             Settings.Set("RightColumns", _right.ColumnWidths);
             Settings.Set("LeftColumnOrder", _left.ColumnOrder);
