@@ -10,8 +10,10 @@ namespace S3bopus
 {
     internal sealed class MainForm : Form
     {
-        readonly PaneTabs _leftTabs, _rightTabs;
-        readonly SplitContainer _split, _outer;
+        static readonly string[] Sides = { "Left", "Right", "Third", "Fourth" }; // préfixes des réglages par panneau
+        readonly PaneTabs[] _tabs;
+        readonly SplitContainer _outer;
+        readonly List<SplitContainer> _splits = new List<SplitContainer>(); // séparateurs imbriqués, Tag = proportion du premier côté
         readonly QueuePanel _queuePanel;
         readonly TransferQueue _queue = new TransferQueue();
         readonly ToolStrip _commands, _fkeys;
@@ -24,7 +26,6 @@ namespace S3bopus
         ToolStripControlHost _marqHost;
 #endif
         FilePane _active;
-        double _ratio = 0.5;
 
         public MainForm(string[] args)
         {
@@ -42,6 +43,8 @@ namespace S3bopus
             FilePane.ShowHidden = Settings.GetBool("ShowHidden", true);
             FilePane.AutoSizes = Settings.GetBool("AutoSizes", true);
             ExplorerListView.RowSelect = Settings.GetBool("RowSelect", true);
+            int nPanes = Math.Max(1, Math.Min(4, Settings.GetInt("Panes", 2)));
+            _tabs = new PaneTabs[nPanes];
 
             // ---- Barre de commandes (style Explorateur Windows 11)
             _commands = new ToolStrip
@@ -172,6 +175,14 @@ namespace S3bopus
             }) { Checked = Settings.GetBool("UpdateCheck", true) };
             more.DropDownItems.Insert(more.DropDownItems.Count - 1, miUpdate);
             // Transparence de toute la fenêtre (on voit le bureau à travers), réglage « Opacity » en %, comme dans s3bXterm
+            var miPanes = new ToolStripMenuItem(Lang.T("Nombre de panneaux (redémarre S3bopus)", "Number of panes (restarts S3bopus)"));
+            for (int n = 1; n <= 4; n++)
+            {
+                int k = n;
+                miPanes.DropDownItems.Add(new ToolStripMenuItem(k.ToString(), null, (s, e) => { if (k != nPanes) Relaunch("Panes", k); }) { Checked = k == nPanes });
+            }
+            miPanes.DropDown.Renderer = new ExplorerRenderer();
+            more.DropDownItems.Insert(more.DropDownItems.Count - 1, miPanes);
             var miOp = new ToolStripMenuItem(Lang.T("Transparence de la fenêtre", "Window transparency"));
             Opacity = Math.Max(30, Math.Min(100, Settings.GetInt("Opacity", 100))) / 100.0;
             foreach (int pct in new[] { 100, 90, 80, 70, 60, 50, 40 })
@@ -191,39 +202,50 @@ namespace S3bopus
             _commands.Items.Add(new ToolStripButton(null, Ui.Glyph(Ui.Dark ? '' : '', ink), (s, e) => Relaunch("Dark", !Ui.Dark))
                 { Alignment = ToolStripItemAlignment.Right, ToolTipText = Ui.Dark ? Lang.T("Mode clair", "Light mode") : Lang.T("Mode sombre", "Dark mode") });
 
-            // ---- Panneaux (un jeu d'onglets par côté)
-            FilePane MakePane(string side)
+            // ---- Panneaux (un jeu d'onglets par côté, 1 à 4)
+            FilePane MakePane(int i)
             {
+                string side = Sides[i];
                 var p = new FilePane { Queue = _queue };
-                p.OtherPane = () => side == "Left" ? _right : _left;
+                p.OtherPane = () => OtherOf(p);
                 p.Activated += x => SetActive(x);
                 // Favoris automatiques : chaque dossier réel ouvert compte (pas la réouverture des onglets au démarrage)
                 p.PathChanged += x => { if (_started && !x.IsThisPC && !x.IsArchive) Favorites.Visit(x.CurrentPath); };
                 // Les nouveaux onglets reprennent les colonnes et le tri de l'onglet courant
-                var model = (side == "Left" ? _leftTabs : _rightTabs)?.Current;
+                var model = _tabs[i]?.Current;
                 p.ColumnWidths = model?.ColumnWidths ?? Settings.Get(side + "Columns");
                 p.ColumnOrder = model?.ColumnOrder ?? Settings.Get(side + "ColumnOrder");
                 p.FontSize = model?.FontSize ?? Settings.GetInt(side + "FontSize", 9);
                 p.SetSort(model?.SortColumn ?? Settings.GetInt(side + "Sort", 0), model?.SortAscending ?? Settings.GetBool(side + "Asc", true));
                 return p;
             }
-            _leftTabs = new PaneTabs(() => MakePane("Left")) { Dock = DockStyle.Fill };
-            _rightTabs = new PaneTabs(() => MakePane("Right")) { Dock = DockStyle.Fill };
-            _leftTabs.CurrentChanged += p => SetActive(p);
-            _rightTabs.CurrentChanged += p => SetActive(p);
-
-            _split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterWidth = Ui.S(5), BackColor = Ui.Splitter, TabStop = false };
-            _split.Panel1.BackColor = _split.Panel2.BackColor = Ui.Back;
-            _split.Panel1.Controls.Add(_leftTabs);
-            _split.Panel2.Controls.Add(_rightTabs);
-            _split.SplitterMoved += (s, e) => { if (_split.Width > 0) _ratio = (double)_split.SplitterDistance / _split.Width; };
+            for (int i = 0; i < nPanes; i++)
+            {
+                int idx = i;
+                _tabs[i] = new PaneTabs(() => MakePane(idx)) { Dock = DockStyle.Fill };
+                _tabs[i].CurrentChanged += p => SetActive(p);
+            }
+            // Séparateurs imbriqués : [1 | [2 | [3 | 4]]], chacun garde sa proportion au redimensionnement
+            Control Layout(int from)
+            {
+                if (from == nPanes - 1) return _tabs[from];
+                var sp = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterWidth = Ui.S(5), BackColor = Ui.Splitter, TabStop = false, Tag = 1.0 / (nPanes - from) };
+                sp.Panel1.BackColor = sp.Panel2.BackColor = Ui.Back;
+                sp.Panel1.Controls.Add(_tabs[from]);
+                sp.Panel2.Controls.Add(Layout(from + 1));
+                sp.SplitterMoved += (s, e) => { if (sp.Width > 0) sp.Tag = (double)sp.SplitterDistance / sp.Width; };
+                sp.Resize += (s, e) => ApplyRatio(sp);
+                _splits.Add(sp);
+                return sp;
+            }
+            Control panes = Layout(0);
 
             _queuePanel = new QueuePanel(_queue) { Dock = DockStyle.Fill };
             _queuePanel.CloseRequested += () => ShowQueue(false);
             _queuePanel.OpenFolderRequested += p => { _active.Navigate(p); _active.FocusList(); };
 
             _outer = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterWidth = Ui.S(5), BackColor = Ui.Splitter, FixedPanel = FixedPanel.Panel2, TabStop = false };
-            _outer.Panel1.Controls.Add(_split);
+            _outer.Panel1.Controls.Add(panes);
             _outer.Panel2.Controls.Add(_queuePanel);
             _outer.Panel2Collapsed = true;
 
@@ -247,7 +269,7 @@ namespace S3bopus
             FK("F6", Lang.T("Déplacer →", "Move →"), () => TransferToOther(JobKind.Move));
             FK("F7", Lang.T("Nouveau dossier", "New folder"), () => _active.NewFolder());
             FK("F8", Lang.T("Supprimer", "Delete"), () => _active.DeleteSelected(false));
-            FK("Tab", Lang.T("Autre panneau", "Other pane"), () => SetActive(Other).FocusList());
+            FK("Tab", Lang.T("Autre panneau", "Other pane"), () => SetActive(Other ?? _active).FocusList());
             FK("Ctrl+T", Lang.T("File de transferts", "Transfer queue"), () => ShowQueue(_outer.Panel2Collapsed));
 
             var topLine = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Ui.Line };
@@ -283,22 +305,20 @@ namespace S3bopus
 
             // ---- Position / chemins de départ
             RestoreWindow();
-            string leftPath = args.Length > 0 ? args[0] : Settings.Get("LeftPath", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-            string rightPath = args.Length > 1 ? args[1] : Settings.Get("RightPath", Native.KnownFolder(Native.FOLDERID_Downloads) ?? AddressBar.ThisPC);
+            string DefaultPath(int i) => i == 1 ? Native.KnownFolder(Native.FOLDERID_Downloads) ?? AddressBar.ThisPC : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             Load += (s, e) =>
             {
-                _ratio = Settings.GetInt("Split", 500) / 1000.0;
-                ApplyRatio();
+                if (_splits.Count > 0 && nPanes == 2) _splits[0].Tag = Settings.GetInt("Split", 500) / 1000.0;
+                foreach (var sp in _splits) ApplyRatio(sp);
                 _queueHeight = Settings.GetInt("QueueHeight", Ui.S(200));
                 if (Settings.GetBool("Queue", true)) ShowQueue(true);
-                RestoreTabs(_leftTabs, "Left", leftPath, args.Length > 0);
-                RestoreTabs(_rightTabs, "Right", rightPath, args.Length > 1);
-                SetActive(_left);
-                _left.FocusList();
+                for (int i = 0; i < nPanes; i++)
+                    RestoreTabs(_tabs[i], Sides[i], i < args.Length ? args[i] : Settings.Get(Sides[i] + "Path", DefaultPath(i)), i < args.Length);
+                SetActive(_tabs[0].Current);
+                _tabs[0].Current.FocusList();
                 _started = true;
                 if (Settings.GetBool("UpdateCheck", true)) CheckUpdate();
             };
-            _split.Resize += (s, e) => ApplyRatio();
         }
 
 #if !LIGHT
@@ -352,12 +372,13 @@ namespace S3bopus
             }, ui);
         }
 
-        void Relaunch(string key, bool value)
+        void Relaunch(string key, object value)
         {
+            string old = Settings.Get(key);
             Settings.Set(key, value);
             Close(); // enregistre les réglages ; peut être annulé si des transferts sont en cours
             if (IsDisposed) Process.Start(Application.ExecutablePath); // sans arguments : on reprend les dossiers enregistrés
-            else Settings.Set(key, !value);
+            else Settings.Set(key, old);
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -382,19 +403,25 @@ namespace S3bopus
             tabs.Select(tabs.Panes[current]);
         }
 
-        FilePane _left => _leftTabs.Current;
-        FilePane _right => _rightTabs.Current;
-        IEnumerable<FilePane> AllPanes => _leftTabs.Panes.Concat(_rightTabs.Panes);
-        PaneTabs ActiveTabs => _leftTabs.Panes.Contains(_active) ? _leftTabs : _rightTabs;
+        IEnumerable<FilePane> AllPanes => _tabs.SelectMany(t => t.Panes);
+        PaneTabs ActiveTabs => _tabs.First(t => t.Panes.Contains(_active));
 
-        void ApplyRatio()
+        static void ApplyRatio(SplitContainer sp)
         {
-            int d = (int)(_split.Width * _ratio);
-            if (d > _split.Panel1MinSize && d < _split.Width - _split.Panel2MinSize - _split.SplitterWidth)
-                try { _split.SplitterDistance = d; } catch { }
+            int d = (int)(sp.Width * (double)sp.Tag);
+            if (d > sp.Panel1MinSize && d < sp.Width - sp.Panel2MinSize - sp.SplitterWidth)
+                try { sp.SplitterDistance = d; } catch { }
         }
 
-        FilePane Other => ActiveTabs == _leftTabs ? _right : _left;
+        /// <summary>Le panneau « autre » : le suivant, en rond ; null s'il n'y a qu'un panneau.</summary>
+        FilePane OtherOf(FilePane p)
+        {
+            if (_tabs.Length < 2) return null;
+            int i = Array.FindIndex(_tabs, t => t.Panes.Contains(p));
+            return i < 0 ? null : _tabs[(i + 1) % _tabs.Length].Current;
+        }
+
+        FilePane Other => OtherOf(_active);
 
         FilePane SetActive(FilePane pane)
         {
@@ -409,6 +436,7 @@ namespace S3bopus
         {
             var src = _active;
             var dst = Other;
+            if (dst == null) { System.Media.SystemSounds.Beep.Play(); return; }
             // Archives en lecture seule : on peut copier depuis, pas déplacer ni écrire dedans
             if (src.SelectedEntries().Count == 0 || src.IsThisPC || dst.IsThisPC || dst.IsArchive || dst.CurrentPath == null || (src.IsArchive && kind == JobKind.Move))
             {
@@ -467,12 +495,14 @@ namespace S3bopus
 
         void SwapPanes()
         {
-            string a = _left.CurrentPath, b = _right.CurrentPath;
-            _left.Navigate(b);
-            _right.Navigate(a);
+            if (_tabs.Length < 2) return;
+            FilePane l = _tabs[0].Current, r = _tabs[1].Current;
+            string a = l.CurrentPath, b = r.CurrentPath;
+            l.Navigate(b);
+            r.Navigate(a);
         }
 
-        void SyncOther() => Other.Navigate(_active.CurrentPath);
+        void SyncOther() => Other?.Navigate(_active.CurrentPath);
 
         void ToggleHidden()
         {
@@ -485,7 +515,7 @@ namespace S3bopus
         {
             FilePane.AutoSizes = !FilePane.AutoSizes;
             _miAutoSizes.Checked = FilePane.AutoSizes;
-            if (FilePane.AutoSizes) { _left.ComputeSizes(false); _right.ComputeSizes(false); }
+            if (FilePane.AutoSizes) foreach (var t in _tabs) t.Current.ComputeSizes(false);
         }
 
         void OpenTerminal()
@@ -519,7 +549,7 @@ namespace S3bopus
 
         void About()
         {
-            string text ="S3bopus " + UpdateCheck.Current + " — 2026-11-11\n\n" + (Lang.En ?
+            string text ="S3bopus " + UpdateCheck.Current + " — 2026-11-15\n\n" + (Lang.En ?
                 "Lightweight dual-pane file manager.\n\n" +
                 "Shortcuts:\n" +
                 "  Tab  switch pane\n" +
@@ -576,13 +606,13 @@ namespace S3bopus
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            bool inList = _left.List.Focused || _right.List.Focused;
-            bool editing = _left.IsEditing || _right.IsEditing;
+            bool inList = _tabs.Any(t => t.Current.List.Focused);
+            bool editing = _tabs.Any(t => t.Current.IsEditing);
             if (!editing)
             {
                 switch (keyData)
                 {
-                    case Keys.Tab when inList:
+                    case Keys.Tab when inList && Other != null:
                         SetActive(Other).FocusList();
                         return true;
                     case Keys.F3: _active.ComputeSizes(true); return true;
@@ -641,24 +671,19 @@ namespace S3bopus
             var rb = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
             Settings.Set("Bounds", rb.X + "," + rb.Y + "," + rb.Width + "," + rb.Height);
             Settings.Set("Maximized", WindowState == FormWindowState.Maximized);
-            Settings.Set("LeftPath", _left.CurrentPath);
-            Settings.Set("RightPath", _right.CurrentPath);
-            foreach (var (side, tabs) in new[] { ("Left", _leftTabs), ("Right", _rightTabs) })
+            for (int i = 0; i < _tabs.Length; i++)
             {
+                var tabs = _tabs[i]; var cur = tabs.Current; string side = Sides[i];
+                Settings.Set(side + "Path", cur.CurrentPath);
                 Settings.Set(side + "Tabs", string.Join("\u001f", tabs.Panes.Select(p => p.CurrentPath)));
-                Settings.Set(side + "Tab", tabs.Panes.ToList().IndexOf(tabs.Current));
+                Settings.Set(side + "Tab", tabs.Panes.ToList().IndexOf(cur));
+                Settings.Set(side + "FontSize", cur.FontSize);
+                Settings.Set(side + "Columns", cur.ColumnWidths);
+                Settings.Set(side + "ColumnOrder", cur.ColumnOrder);
+                Settings.Set(side + "Sort", cur.SortColumn);
+                Settings.Set(side + "Asc", cur.SortAscending);
             }
-            Settings.Set("LeftFontSize", _left.FontSize);
-            Settings.Set("RightFontSize", _right.FontSize);
-            Settings.Set("LeftColumns", _left.ColumnWidths);
-            Settings.Set("RightColumns", _right.ColumnWidths);
-            Settings.Set("LeftColumnOrder", _left.ColumnOrder);
-            Settings.Set("RightColumnOrder", _right.ColumnOrder);
-            Settings.Set("LeftSort", _left.SortColumn);
-            Settings.Set("LeftAsc", _left.SortAscending);
-            Settings.Set("RightSort", _right.SortColumn);
-            Settings.Set("RightAsc", _right.SortAscending);
-            Settings.Set("Split", (int)(_ratio * 1000));
+            if (_splits.Count > 0 && _tabs.Length == 2) Settings.Set("Split", (int)((double)_splits[0].Tag * 1000));
             Settings.Set("Queue", !_outer.Panel2Collapsed);
             Settings.Set("QueueHeight", _outer.Panel2Collapsed ? _queueHeight : _outer.Panel2.Height);
             Settings.Set("ShowHidden", FilePane.ShowHidden);

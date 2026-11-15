@@ -1,6 +1,6 @@
 # S3bopus
 
-Explorateur de fichiers à deux panneaux (inspiré de Directory Opus). Version courante : 1.0.6 (Windows), 1.0.5 (Linux), 1.0.1 (Mac). Réponses et commentaires en français.
+Explorateur de fichiers à deux panneaux (inspiré de Directory Opus). Version courante : 1.0.7 (Windows), 1.0.5 (Linux), 1.0.1 (Mac). Réponses et commentaires en français.
 
 ## Structure
 - `src/` : version Windows, WinForms sur .NET Framework 4.8 (`net48`, LangVersion 10), appels Win32 (shell32, CopyFileEx).
@@ -22,6 +22,7 @@ Explorateur de fichiers à deux panneaux (inspiré de Directory Opus). Version c
 - `mac/` : textes `Lang.T(fr, en)` (même principe), réglages dans UserDefaults (`com.s3btify.s3bopus`), mise en page racine à la main (`RootView`) : le `NSSplitView` se laisse mal contraindre par Auto Layout. Raccourcis : F-keys comme Windows, ⌘ pour le reste (⌘T onglet, ⌘J file, ⌘⌫ corbeille, ⌥⌘C/X copier/déplacer vers l'autre panneau).
 - Textes : `Lang.T(fr, en)`. Thème : `Ui.Dark` et les couleurs de `Ui`. Langue et thème sont appliqués au redémarrage sous Windows.
 - Lien S3btify (Windows full seulement, jamais dans le light ni sous Linux/Mac) : `src/S3btifyLink.cs` (`#if !LIGHT`) interroge toutes les 2 s le lecteur S3btify en local (127.0.0.1, port 34565 par défaut, réglage `S3btifyPort`) : `GET /api/player` → JSON `{app:"S3btify", version, playing, title, artist, album}`, et `POST /api/player/{prev|playpause|next}` pour le piloter. Option « Afficher et contrôler S3btify » dans le menu « … » (cochée par défaut, réglage `S3btify`) : un bandeau défilant (`MarqueeBox`) dans la barre de commandes montre une pastille verte (en ligne, S3btify >= 0.15.30A : la version peut finir par une lettre de révision, 0.15.30 < 0.15.30A < 0.15.30B < 0.15.31 ; une 0.15.30 sans lettre est refusée) ou rouge (hors ligne) puis « S3btify <version> · ♪ artiste – titre » et les morceaux suivants (tableau `next` de l'API, 5 au plus) ; les boutons précédent / lecture-pause / suivant n'apparaissent que si S3btify répond. L'interface vient de la session « Tableau de bord S3btify » (dossier `C:\GIT\S3btify`) : port 34565 (127.0.0.1 seulement), commandes `prev`, `playpause`, `next` (aussi `play`, `pause`) ; S3btify répond 403 si l'en-tête Host n'est pas local ou si Origin est présent, 503 si sa fenêtre n'existe pas. Pont livré à partir de S3btify 0.15.30A. Si l'interface change, ne modifier que `S3btifyLink.cs`.
+- Windows 1.0.7 : 1 à 4 panneaux (menu « … » > « Nombre de panneaux », réglage `Panes`, redémarrage ; réglages par côté `Left`/`Right`/`Third`/`Fourth`) ; « l'autre panneau » = le suivant en rond.
 - Réglages : `%APPDATA%\S3bopus\S3bopus.ini` (Windows), `~/.config/S3bopus/S3bopus.ini` (Linux).
 - Chemin « virtuel » dans une archive : `fichier.zip\dossier\sous` (`Archives.Split`). Archive en lecture seule ; F5 / Ctrl+C extraient dans `%TEMP%\S3bopus`, nettoyé au démarrage.
 - Mettre la version à jour dans `src/S3bopus.csproj`, `linux/S3bopus.Linux.csproj`, `linux/Core.cs` (`AppInfo`), `linux/build.cmd`, `mac/Sources/S3bopus/Core.swift` (`AppInfo`).
